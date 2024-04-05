@@ -41,7 +41,7 @@ fn main() {
         },
     );
 
-    let map_img = image::io::Reader::open(format!("{}/maps/map4.png", env!("CARGO_MANIFEST_DIR")))
+    let map_img = image::io::Reader::open(format!("{}/maps/map.png", env!("CARGO_MANIFEST_DIR")))
         .unwrap()
         .decode()
         .unwrap()

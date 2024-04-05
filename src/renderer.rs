@@ -48,7 +48,7 @@ impl Renderer {
         }
 
         // make space for all blocks + block boundaries
-        let bottom_padding = 12;
+        let bottom_padding = 24;
         let img_width = (blocks_in_x + 1) * VPS as i32 + blocks_in_x + 2;
         let img_height = (blocks_in_y + 1) * VPS as i32 + blocks_in_y + 2 + bottom_padding;
 
@@ -157,7 +157,7 @@ impl Renderer {
         }
 
         // render op text
-        let height = 8.0;
+        let height = 16.0;
         let scale = PxScale {
             x: height * 2.0,
             y: height,
