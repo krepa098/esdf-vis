@@ -124,7 +124,7 @@ impl<'a, VoxelType: Voxel, const VPS: usize> BlockWriteLock<'a, VoxelType, VPS> 
     }
 
     pub fn reset_voxels(&mut self) {
-        for mut voxel in self.as_mut_slice() {
+        for voxel in self.as_mut_slice() {
             *voxel = VoxelType::default();
         }
     }
