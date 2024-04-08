@@ -95,8 +95,8 @@ impl<const VPS: usize> GlobalIndex<VPS> {
         )
     }
 
-    pub fn neighbours(&self) -> GlobalIndexNeighbourIter<VPS> {
-        GlobalIndexNeighbourIter { pivot: self, n: 0 }
+    pub fn neighbours(&self) -> IndexNeighbourIter<GlobalIndex<VPS>> {
+        IndexNeighbourIter { pivot: self, n: 0 }
     }
 }
 
@@ -106,19 +106,19 @@ impl<const VPS: usize> From<Point3<i64>> for GlobalIndex<VPS> {
     }
 }
 
-pub struct GlobalIndexNeighbourIter<'a, const VPS: usize> {
-    pivot: &'a GlobalIndex<VPS>,
+pub struct IndexNeighbourIter<'a, T> {
+    pivot: &'a T,
     n: usize,
 }
 
-pub struct Neighbour<const VPS: usize> {
-    pub index: GlobalIndex<VPS>,
+pub struct Neighbour<T> {
+    pub index: T,
     pub dir: Vector3<i64>,
     pub grid_dist: Real,
 }
 
-impl<'a, const VPS: usize> Iterator for GlobalIndexNeighbourIter<'a, VPS> {
-    type Item = Neighbour<VPS>;
+impl<'a, T: From<Point3<i64>> + Into<Point3<i64>> + Copy> Iterator for IndexNeighbourIter<'a, T> {
+    type Item = Neighbour<T>;
 
     fn next(&mut self) -> Option<Self::Item> {
         #[allow(clippy::approx_constant)]
@@ -154,9 +154,11 @@ impl<'a, const VPS: usize> Iterator for GlobalIndexNeighbourIter<'a, VPS> {
             (Vector3::new(1, 1, 1), SQRT_3),
         ];
 
+        let pt: Point3<i64> = (*self.pivot).into();
+
         let offset = NEIGHBOUR_OFFSETS.get(self.n);
         let next = offset.map(|(offset, dist)| Neighbour {
-            index: GlobalIndex(self.pivot.0 + offset),
+            index: (pt + offset).into(),
             dir: offset.to_owned(),
             grid_dist: *dist,
         });
@@ -188,6 +190,12 @@ impl<const VPS: usize> VoxelIndex<VPS> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BlockIndex<const VPS: usize>(pub Point3<i32>);
 
+impl<const VPS: usize> BlockIndex<VPS> {
+    pub fn neighbours(&self) -> IndexNeighbourIter<BlockIndex<VPS>> {
+        IndexNeighbourIter { pivot: self, n: 0 }
+    }
+}
+
 impl<const VPS: usize> Deref for BlockIndex<VPS> {
     type Target = Point3<i32>;
 
@@ -208,9 +216,16 @@ impl<const VPS: usize> From<Point3<i64>> for BlockIndex<VPS> {
     }
 }
 
+impl<const VPS: usize> Into<Point3<i64>> for BlockIndex<VPS> {
+    fn into(self) -> Point3<i64> {
+        self.0.cast()
+    }
+}
+
 impl<const VPS: usize> BlockIndex<VPS> {
     fn hash(&self) -> i32 {
         (self.x * 18397) + (self.y * 20483) + (self.z * 29303)
+        // (self.x * 31) + (self.y * 37) + (self.z * 41)
     }
 }
 
@@ -223,6 +238,22 @@ impl<const VPS: usize> Ord for BlockIndex<VPS> {
 impl<const VPS: usize> PartialOrd for BlockIndex<VPS> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
+    }
+}
+
+impl<const VPS: usize> Sub for BlockIndex<VPS> {
+    type Output = BlockIndex<VPS>;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        BlockIndex((self.0 - rhs.0).into())
+    }
+}
+
+impl<const VPS: usize> Add for BlockIndex<VPS> {
+    type Output = BlockIndex<VPS>;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        BlockIndex((self.0.coords + rhs.0.coords).into())
     }
 }
 

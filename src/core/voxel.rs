@@ -36,7 +36,7 @@ pub struct Esdf {
     pub hallucinated: bool,
     pub in_queue: bool,
     pub fixed: bool,
-    pub parent: Option<Vector3<i32>>,
+    pub site_block_index: Option<Vector3<i32>>,
 }
 
 impl Voxel for Esdf {}

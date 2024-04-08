@@ -85,8 +85,12 @@ impl Renderer {
                                     &voxel_index,
                                 );
 
-                                let color =
+                                let mut color =
                                     rainbow_map(((voxel.distance - d_min) / d_range) as f32);
+
+                                // if let Some(index) = voxel.site_block_index {
+                                //     color = rainbow_map(index.cast::<f32>().norm_squared() / 17.0);
+                                // }
 
                                 img.get_pixel_mut(
                                     (index.x + block_index.x as i64) as u32 + 1,
@@ -178,6 +182,7 @@ impl Renderer {
 
     pub fn render_gif(&mut self, path: &str) {
         use image::codecs::gif::GifEncoder;
+        let frame_count = self.frames.len();
 
         let file = std::fs::File::create(path).unwrap();
         let mut encoder = GifEncoder::new(file);
@@ -185,12 +190,16 @@ impl Renderer {
             .set_repeat(image::codecs::gif::Repeat::Infinite)
             .unwrap();
         encoder
-            .encode_frames(self.frames.iter().map(|f| {
+            .encode_frames(self.frames.iter().enumerate().map(|(i, f)| {
                 image::Frame::from_parts(
                     f.convert(),
                     0,
                     0,
-                    Delay::from_saturating_duration(Duration::from_millis(100)),
+                    if frame_count - 1 == i {
+                        Delay::from_saturating_duration(Duration::from_millis(1000))
+                    } else {
+                        Delay::from_saturating_duration(Duration::from_millis(100))
+                    },
                 )
             }))
             .unwrap();

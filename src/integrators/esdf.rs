@@ -36,24 +36,103 @@ impl EsdfIntegrator {
         &mut self,
         tsdf_layer: &Layer<Tsdf, VPS>,
         esdf_layer: &mut Layer<Esdf, VPS>,
+        updated_blocks: &BTreeSet<BlockIndex<VPS>>,
         mut callback: F,
     ) {
         let mut dirty_blocks = BTreeSet::new();
         let mut propagate_blocks = BTreeSet::new();
+        let mut sites_indices_to_clear = BTreeSet::new();
+        let mut blocks_to_clear = updated_blocks.clone();
 
+        // allocate all blocks from the tsdf layer
         for block_index in tsdf_layer.allocated_blocks_iter() {
+            esdf_layer.allocate_block_by_index(block_index);
+        }
+
+        // create a list of sites to clear
+        for block_index in updated_blocks {
+            let esdf_block = esdf_layer.allocate_block_by_index(block_index);
+            let mut esdf_lock = esdf_block.write();
+
+            for voxel in esdf_lock.as_mut_slice() {
+                if let Some(site_index) = voxel.site_block_index {
+                    sites_indices_to_clear.insert(BlockIndex::<VPS>::new(
+                        site_index.x,
+                        site_index.y,
+                        site_index.z,
+                    ));
+                }
+            }
+        }
+
+        // create a list of all blocks containing sites to clear
+        let mut open_list = updated_blocks.clone();
+        let mut closed_list = BTreeSet::new();
+        while let Some(index) = open_list.pop_first() {
+            closed_list.insert(index);
+
+            if let Some(esdf_block) = esdf_layer.block_by_index_mut(&index) {
+                {
+                    let mut esdf_lock = esdf_block.write();
+
+                    for voxel in esdf_lock.as_mut_slice() {
+                        if let Some(site_index) = voxel.site_block_index {
+                            if sites_indices_to_clear.contains(&BlockIndex::<VPS>::new(
+                                site_index.x,
+                                site_index.y,
+                                site_index.z,
+                            )) {
+                                blocks_to_clear.insert(index);
+                            }
+                        }
+                    }
+                }
+
+                // also explore its neighbours
+                for neighbour in index.neighbours() {
+                    if !closed_list.contains(&neighbour.index)
+                        && esdf_layer.block_by_index(&neighbour.index).is_some()
+                    {
+                        open_list.insert(neighbour.index);
+                        // dbg!("foo", neighbour.index);
+                    }
+                }
+            }
+
+            // blocks_to_check.clear();
+        }
+
+        // reset blocks
+        for block_index in &blocks_to_clear {
+            {
+                let esdf_block = esdf_layer.allocate_block_by_index(block_index);
+                let mut esdf_lock = esdf_block.write();
+                esdf_lock.reset_voxels();
+            }
+
+            callback("clear site (esdf)", tsdf_layer, esdf_layer, block_index);
+        }
+
+        // transfer tsdf to esdf
+        for block_index in &blocks_to_clear {
             let tsdf_block = tsdf_layer.block_by_index(block_index).unwrap();
             let esdf_block = esdf_layer.allocate_block_by_index(block_index);
             let mut esdf_lock = esdf_block.write();
 
             for (i, tsdf_voxel) in tsdf_block.read().as_slice().iter().enumerate() {
+                let esdf_voxel = esdf_lock.voxel_from_lin_index_mut(i);
+
                 if tsdf_voxel.weight > 0.0 {
-                    let esdf_voxel = esdf_lock.voxel_from_lin_index_mut(i);
                     esdf_voxel.distance = tsdf_voxel.distance;
                     esdf_voxel.fixed = true;
                     esdf_voxel.observed = true;
-
+                    esdf_voxel.site_block_index = Some(block_index.coords);
                     dirty_blocks.insert(*block_index);
+                } else {
+                    esdf_voxel.distance = 0.0;
+                    esdf_voxel.fixed = false;
+                    esdf_voxel.observed = false;
+                    esdf_voxel.site_block_index = None;
                 }
             }
         }
@@ -143,6 +222,7 @@ impl EsdfIntegrator {
                     let parent_voxel = lock.voxel_from_index(&parent_voxel_index);
                     let parent_fixed = parent_voxel.fixed;
                     let parent_dist = parent_voxel.distance;
+                    let parent_site_block_index = parent_voxel.site_block_index;
 
                     let voxel = lock.voxel_from_index_mut(&voxel_index);
 
@@ -150,8 +230,12 @@ impl EsdfIntegrator {
                         if !voxel.fixed {
                             voxel.distance = parent_dist + voxel_size;
                             voxel.fixed = true;
+                            voxel.site_block_index = parent_site_block_index;
                         } else {
-                            voxel.distance = voxel.distance.min(parent_dist + voxel_size);
+                            if voxel.distance > parent_dist + voxel_size {
+                                voxel.distance = voxel.distance.min(parent_dist + voxel_size);
+                                voxel.site_block_index = parent_site_block_index;
+                            }
                         }
                     }
                 }
@@ -207,6 +291,7 @@ impl EsdfIntegrator {
                     let pivot_voxel = pivot_block.voxel_from_index(&p_voxel_index);
                     let pivot_fixed = pivot_voxel.fixed;
                     let pivot_dist = pivot_voxel.distance;
+                    let pivot_site_block_index = pivot_voxel.site_block_index;
 
                     let neighbour_voxel = nlock.voxel_from_index_mut(&n_voxel_index);
                     let neighbour_fixed = neighbour_voxel.fixed;
@@ -217,11 +302,13 @@ impl EsdfIntegrator {
                             // found a shorter distance?
                             if neighbour_voxel.distance > pivot_dist + voxel_size {
                                 neighbour_voxel.distance = pivot_dist + voxel_size;
+                                neighbour_voxel.site_block_index = pivot_site_block_index;
                                 dirty = true;
                             }
                         } else {
                             neighbour_voxel.distance = pivot_dist + voxel_size;
                             neighbour_voxel.fixed = true;
+                            neighbour_voxel.site_block_index = pivot_site_block_index;
                             dirty = true;
                         }
                     }

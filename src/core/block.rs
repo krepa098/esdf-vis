@@ -122,6 +122,12 @@ impl<'a, VoxelType: Voxel, const VPS: usize> BlockWriteLock<'a, VoxelType, VPS> 
         let lin_index = Block::<VoxelType, VPS>::lin_index_from_voxel_index(index);
         self.as_mut_slice().get_mut(lin_index).unwrap()
     }
+
+    pub fn reset_voxels(&mut self) {
+        for mut voxel in self.as_mut_slice() {
+            *voxel = VoxelType::default();
+        }
+    }
 }
 
 pub struct BlockReadLock<'a, VoxelType: Voxel, const VPS: usize> {
