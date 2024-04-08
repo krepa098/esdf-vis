@@ -17,7 +17,7 @@ static COLOR_GRID: [u8; 3] = [0, 0, 0];
 static COLOR_TSDF: [u8; 3] = [150, 150, 150];
 
 pub struct Renderer {
-    frames: Vec<RgbImage>,
+    frames: Vec<(RgbImage, std::time::Duration)>,
     font: FontArc,
 }
 
@@ -36,8 +36,9 @@ impl Renderer {
         &mut self,
         tsdf_layer: &Layer<Tsdf, VPS>,
         esdf_layer: &Layer<Esdf, VPS>,
-        block_of_interest: &BlockIndex<VPS>,
+        block_of_interest: Option<&BlockIndex<VPS>>,
         op: &str,
+        duration: Option<std::time::Duration>,
     ) {
         let mut blocks_in_x = 0;
         let mut blocks_in_y = 0;
@@ -133,31 +134,33 @@ impl Renderer {
         }
 
         // render frame around block of interest
-        for vx in 0..=VPS + 1 {
-            img.get_pixel_mut(
-                (vx + block_of_interest.x as usize * VPS + block_of_interest.x as usize) as u32,
-                (block_of_interest.y as usize * VPS + block_of_interest.y as usize) as u32,
-            )
-            .0 = COLOR_OF_INTEREST;
-            img.get_pixel_mut(
-                (vx + block_of_interest.x as usize * VPS + block_of_interest.x as usize) as u32,
-                (block_of_interest.y as usize * VPS + block_of_interest.y as usize + VPS + 1)
-                    as u32,
-            )
-            .0 = COLOR_OF_INTEREST;
-        }
-        for vy in 0..=VPS + 1 {
-            img.get_pixel_mut(
-                (block_of_interest.x as usize * VPS + block_of_interest.x as usize) as u32,
-                (vy + block_of_interest.y as usize * VPS + block_of_interest.y as usize) as u32,
-            )
-            .0 = COLOR_OF_INTEREST;
-            img.get_pixel_mut(
-                ((block_of_interest.x as usize + 1) * VPS + block_of_interest.x as usize + 1)
-                    as u32,
-                (vy + block_of_interest.y as usize * VPS + block_of_interest.y as usize) as u32,
-            )
-            .0 = COLOR_OF_INTEREST;
+        if let Some(block_of_interest) = block_of_interest {
+            for vx in 0..=VPS + 1 {
+                img.get_pixel_mut(
+                    (vx + block_of_interest.x as usize * VPS + block_of_interest.x as usize) as u32,
+                    (block_of_interest.y as usize * VPS + block_of_interest.y as usize) as u32,
+                )
+                .0 = COLOR_OF_INTEREST;
+                img.get_pixel_mut(
+                    (vx + block_of_interest.x as usize * VPS + block_of_interest.x as usize) as u32,
+                    (block_of_interest.y as usize * VPS + block_of_interest.y as usize + VPS + 1)
+                        as u32,
+                )
+                .0 = COLOR_OF_INTEREST;
+            }
+            for vy in 0..=VPS + 1 {
+                img.get_pixel_mut(
+                    (block_of_interest.x as usize * VPS + block_of_interest.x as usize) as u32,
+                    (vy + block_of_interest.y as usize * VPS + block_of_interest.y as usize) as u32,
+                )
+                .0 = COLOR_OF_INTEREST;
+                img.get_pixel_mut(
+                    ((block_of_interest.x as usize + 1) * VPS + block_of_interest.x as usize + 1)
+                        as u32,
+                    (vy + block_of_interest.y as usize * VPS + block_of_interest.y as usize) as u32,
+                )
+                .0 = COLOR_OF_INTEREST;
+            }
         }
 
         // render op text
@@ -177,12 +180,14 @@ impl Renderer {
             op,
         );
 
-        self.frames.push(img);
+        self.frames.push((
+            img,
+            duration.unwrap_or(std::time::Duration::from_millis(100)),
+        ));
     }
 
     pub fn render_gif(&mut self, path: &str) {
         use image::codecs::gif::GifEncoder;
-        let frame_count = self.frames.len();
 
         let file = std::fs::File::create(path).unwrap();
         let mut encoder = GifEncoder::new(file);
@@ -190,17 +195,8 @@ impl Renderer {
             .set_repeat(image::codecs::gif::Repeat::Infinite)
             .unwrap();
         encoder
-            .encode_frames(self.frames.iter().enumerate().map(|(i, f)| {
-                image::Frame::from_parts(
-                    f.convert(),
-                    0,
-                    0,
-                    if frame_count - 1 == i {
-                        Delay::from_saturating_duration(Duration::from_millis(1000))
-                    } else {
-                        Delay::from_saturating_duration(Duration::from_millis(100))
-                    },
-                )
+            .encode_frames(self.frames.iter().enumerate().map(|(i, (f, d))| {
+                image::Frame::from_parts(f.convert(), 0, 0, Delay::from_saturating_duration(*d))
             }))
             .unwrap();
     }

@@ -40,10 +40,22 @@ fn main() {
         &mut esdf_layer,
         &dirty_blocks,
         move |op, tsdf_layer, esdf_layer, block_index| {
-            renderer_cb
-                .borrow_mut()
-                .render_tsdf_layer(tsdf_layer, esdf_layer, block_index, op);
+            renderer_cb.borrow_mut().render_tsdf_layer(
+                tsdf_layer,
+                esdf_layer,
+                Some(block_index),
+                op,
+                None,
+            );
         },
+    );
+
+    renderer.borrow_mut().render_tsdf_layer(
+        &tsdf_layer,
+        &esdf_layer,
+        None,
+        "",
+        Some(std::time::Duration::from_secs(2)),
     );
 
     let map_img = image::io::Reader::open(format!("{}/maps/map3b.png", env!("CARGO_MANIFEST_DIR")))
@@ -65,10 +77,22 @@ fn main() {
         &mut esdf_layer,
         &dirty_blocks,
         move |op, tsdf_layer, esdf_layer, block_index| {
-            renderer_cb
-                .borrow_mut()
-                .render_tsdf_layer(tsdf_layer, esdf_layer, block_index, op);
+            renderer_cb.borrow_mut().render_tsdf_layer(
+                tsdf_layer,
+                esdf_layer,
+                Some(block_index),
+                op,
+                None,
+            );
         },
+    );
+
+    renderer.borrow_mut().render_tsdf_layer(
+        &tsdf_layer,
+        &esdf_layer,
+        None,
+        "",
+        Some(std::time::Duration::from_secs(2)),
     );
 
     renderer
