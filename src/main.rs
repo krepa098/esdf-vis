@@ -27,7 +27,7 @@ fn main() {
     let mut esdf_layer = EsdfLayer::new(1.0);
     let mut esdf_integrator = EsdfIntegrator::new(EsdfIntegratorConfig::default());
 
-    let renderer = std::rc::Rc::new(std::cell::RefCell::new(Renderer::new()));
+    let renderer = std::rc::Rc::new(std::cell::RefCell::new(Renderer::new(true)));
 
     // map to tsdf
     let mut dirty_blocks = BTreeSet::new();
@@ -66,11 +66,9 @@ fn main() {
 
     // map to tsdf
     dirty_blocks.clear();
-    // tsdf_layer.clear(); // partial updates not implemented
     tsdf_integrator.integrate_image(&mut tsdf_layer, &map_img, &mut dirty_blocks);
 
     // generate esdf and render on callback
-    // esdf_layer.clear(); // partial updates not implemented
     let renderer_cb = renderer.clone();
     esdf_integrator.update_blocks(
         &tsdf_layer,
@@ -92,7 +90,7 @@ fn main() {
         &esdf_layer,
         None,
         "",
-        Some(std::time::Duration::from_secs(2)),
+        Some(std::time::Duration::from_secs(4)),
     );
 
     renderer

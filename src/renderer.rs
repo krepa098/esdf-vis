@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{hash::Hash, time::Duration};
 
 use ab_glyph::{FontArc, PxScale};
 use image::{buffer::ConvertBuffer, Delay, RgbImage};
@@ -19,16 +19,18 @@ static COLOR_TSDF: [u8; 3] = [150, 150, 150];
 pub struct Renderer {
     frames: Vec<(RgbImage, std::time::Duration)>,
     font: FontArc,
+    sites: bool,
 }
 
 impl Renderer {
-    pub fn new() -> Self {
+    pub fn new(sites: bool) -> Self {
         let font =
             FontArc::try_from_slice(include_bytes!("../fonts/DejaVuSansCondensed.ttf")).unwrap();
 
         Self {
             frames: vec![],
             font,
+            sites,
         }
     }
 
@@ -86,12 +88,13 @@ impl Renderer {
                                     &voxel_index,
                                 );
 
-                                let mut color =
-                                    rainbow_map(((voxel.distance - d_min) / d_range) as f32);
-
-                                // if let Some(index) = voxel.site_block_index {
-                                //     color = rainbow_map(index.cast::<f32>().norm_squared() / 17.0);
-                                // }
+                                let color = if self.sites {
+                                    rainbow_map(voxel.site_block_index.map_or(0.0, |index| {
+                                        index.cast::<f32>().norm_squared() / 16.0
+                                    }))
+                                } else {
+                                    rainbow_map(((voxel.distance - d_min) / d_range) as f32)
+                                };
 
                                 img.get_pixel_mut(
                                     (index.x + block_index.x as i64) as u32 + 1,
@@ -166,19 +169,31 @@ impl Renderer {
         // render op text
         let height = 16.0;
         let scale = PxScale {
-            x: height * 2.0,
+            x: height,
             y: height,
         };
         let y_pos = img.height() as i32 - bottom_padding;
-        draw_text_mut(
-            &mut img,
-            image::Rgb([0, 0, 255]),
-            0,
-            y_pos,
-            scale,
-            &self.font,
-            op,
-        );
+        if self.sites {
+            draw_text_mut(
+                &mut img,
+                image::Rgb([0, 0, 255]),
+                8,
+                y_pos,
+                scale,
+                &self.font,
+                "sites",
+            );
+        } else {
+            draw_text_mut(
+                &mut img,
+                image::Rgb([0, 0, 255]),
+                8,
+                y_pos,
+                scale,
+                &self.font,
+                op,
+            );
+        }
 
         self.frames.push((
             img,

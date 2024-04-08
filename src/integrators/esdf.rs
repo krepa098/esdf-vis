@@ -94,7 +94,6 @@ impl EsdfIntegrator {
                         && esdf_layer.block_by_index(&neighbour.index).is_some()
                     {
                         open_list.insert(neighbour.index);
-                        // dbg!("foo", neighbour.index);
                     }
                 }
             }
@@ -110,7 +109,7 @@ impl EsdfIntegrator {
                 esdf_lock.reset_voxels();
             }
 
-            callback("clear site (esdf)", tsdf_layer, esdf_layer, block_index);
+            callback("clear site", tsdf_layer, esdf_layer, block_index);
         }
 
         // transfer tsdf to esdf
@@ -231,11 +230,9 @@ impl EsdfIntegrator {
                             voxel.distance = parent_dist + voxel_size;
                             voxel.fixed = true;
                             voxel.site_block_index = parent_site_block_index;
-                        } else {
-                            if voxel.distance > parent_dist + voxel_size {
-                                voxel.distance = voxel.distance.min(parent_dist + voxel_size);
-                                voxel.site_block_index = parent_site_block_index;
-                            }
+                        } else if voxel.distance > parent_dist + voxel_size {
+                            voxel.distance = voxel.distance.min(parent_dist + voxel_size);
+                            voxel.site_block_index = parent_site_block_index;
                         }
                     }
                 }

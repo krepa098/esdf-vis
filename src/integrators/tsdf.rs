@@ -52,13 +52,11 @@ impl TsdfIntegrator {
                         voxel.weight = 1.0;
                         updated_block_indices.insert(block_index);
                     }
-                } else {
-                    if voxel.weight == 1.0 {
-                        voxel.distance = 0.0;
-                        voxel.weight = 0.0;
+                } else if voxel.weight == 1.0 {
+                    voxel.distance = 0.0;
+                    voxel.weight = 0.0;
 
-                        updated_block_indices.insert(block_index);
-                    }
+                    updated_block_indices.insert(block_index);
                 }
             }
         }

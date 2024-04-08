@@ -216,22 +216,21 @@ impl<const VPS: usize> From<Point3<i64>> for BlockIndex<VPS> {
     }
 }
 
-impl<const VPS: usize> Into<Point3<i64>> for BlockIndex<VPS> {
-    fn into(self) -> Point3<i64> {
-        self.0.cast()
+impl<const VPS: usize> From<BlockIndex<VPS>> for Point3<i64> {
+    fn from(val: BlockIndex<VPS>) -> Self {
+        val.0.cast()
     }
 }
 
 impl<const VPS: usize> BlockIndex<VPS> {
-    fn hash(&self) -> i32 {
+    pub fn hash32(&self) -> i32 {
         (self.x * 18397) + (self.y * 20483) + (self.z * 29303)
-        // (self.x * 31) + (self.y * 37) + (self.z * 41)
     }
 }
 
 impl<const VPS: usize> Ord for BlockIndex<VPS> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.hash().cmp(&other.hash())
+        self.hash32().cmp(&other.hash32())
     }
 }
 
