@@ -7,7 +7,7 @@ pub mod utils;
 pub mod voxel;
 
 pub mod prelude {
-    pub type Real = f64;
+    pub type Real = f32;
 
     pub use nalgebra::Point3;
 

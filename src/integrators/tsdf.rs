@@ -38,7 +38,7 @@ impl TsdfIntegrator {
         for y in 0..image.width() {
             for x in 0..image.height() {
                 let global_index = GlobalIndex::from_point(
-                    &point![x as f64, y as f64, 0.0],
+                    &point![x as Real, y as Real, 0.0],
                     layer.voxel_size_inv(),
                 );
                 let (block_index, voxel_index) = global_index.block_voxel_index();
