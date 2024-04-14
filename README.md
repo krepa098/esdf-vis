@@ -7,10 +7,10 @@ This is a basic implementation of the ```nvblox``` ESDF generation algorithm out
 ![](.media/out.gif)
 
 The *sweep and propagate* algorithm runs on the CPU and operates on a per-block basis.
-The *sweeps* in x, y, z directions are followed by a *propagation* phase, where voxels are transferred across block boundaries. 
+The *sweeps* in x, y, and z directions are followed by a *propagation* phase, where voxels are transferred across block boundaries. 
 This iterative process continues until reaching convergence.
 
-The *sites* are block indices referring the origin, i.e., the block with closest surface to the voxel.
+The *sites* are block indices referring to the origin, i.e., the block with the closest surface to the voxel.
 If the surfaces change, the *sites* are used to identify the blocks that need to be cleared and recalculated.
 
 The original algorithm is a bit smarter and executes those operations in parallel (primarily on the GPU).
