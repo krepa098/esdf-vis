@@ -37,18 +37,6 @@ impl<VoxelType: Voxel, const VPS: usize> Block<VoxelType, VPS> {
         &self.origin
     }
 
-    pub fn lin_index_from_voxel_index(index: &VoxelIndex<VPS>) -> usize {
-        assert!(index.x < VPS);
-        assert!(index.y < VPS);
-        assert!(index.z < VPS);
-
-        let x = index.x;
-        let y = index.y;
-        let z = index.z;
-
-        x + VPS * (y + z * VPS)
-    }
-
     pub fn voxel_index_from_lin_index(index: usize) -> VoxelIndex<VPS> {
         let (q, rem) = num_integer::div_rem(index, VPS * VPS);
         let z = q;
@@ -113,14 +101,12 @@ impl<'a, VoxelType: Voxel, const VPS: usize> BlockWriteLock<'a, VoxelType, VPS> 
 
     #[inline]
     pub fn voxel_from_index(&self, index: &VoxelIndex<VPS>) -> &VoxelType {
-        let lin_index = Block::<VoxelType, VPS>::lin_index_from_voxel_index(index);
-        self.as_slice().get(lin_index).unwrap()
+        self.as_slice().get(index.linear_index()).unwrap()
     }
 
     #[inline]
     pub fn voxel_from_index_mut(&mut self, index: &VoxelIndex<VPS>) -> &mut VoxelType {
-        let lin_index = Block::<VoxelType, VPS>::lin_index_from_voxel_index(index);
-        self.as_mut_slice().get_mut(lin_index).unwrap()
+        self.as_mut_slice().get_mut(index.linear_index()).unwrap()
     }
 
     pub fn reset_voxels(&mut self) {
@@ -152,8 +138,7 @@ impl<'a, VoxelType: Voxel, const VPS: usize> BlockReadLock<'a, VoxelType, VPS> {
 
     #[inline]
     pub fn voxel_from_index(&self, index: &VoxelIndex<VPS>) -> &VoxelType {
-        let lin_index = Block::<VoxelType, VPS>::lin_index_from_voxel_index(index);
-        self.as_slice().get(lin_index).unwrap()
+        self.as_slice().get(index.linear_index()).unwrap()
     }
 }
 
@@ -170,10 +155,7 @@ mod test {
 
     #[test]
     fn test_block_index() {
-        assert_eq!(
-            Block::<TestVoxel, 3>::lin_index_from_voxel_index(&VoxelIndex(Point3::new(2, 2, 2))),
-            26
-        );
+        assert_eq!(VoxelIndex::<3>(Point3::new(2, 2, 2)).linear_index(), 26);
         assert_eq!(
             Block::<TestVoxel, 3>::voxel_index_from_lin_index(26),
             VoxelIndex(Point3::new(2, 2, 2))
