@@ -1,6 +1,6 @@
 // VPS=4  | the fastest, many blocks
 // VPS=8  | still fast, fewer blocks
-// VPS=16 | slowest, does not work with shared memory
+// VPS=16 | slowest, does not work with shared memory (requires 80k, available 64k?)
 //
 const VPS: u32 = 8u;
 const VoxelSize: f32 = 1.0;
@@ -90,7 +90,7 @@ fn main(
     //
     // fetch (global to shared memory)
     for (var w: u32 = 0; w < VPS; w++) {
-        let i = index_to_lin(vec3(local_id.x,local_id.y,w));
+        let i = index_to_lin(vec3(local_id.x, local_id.y, w));
 
         voxel_wg_data[i] = block_voxels[block_id].voxels[i];
     }
@@ -99,8 +99,8 @@ fn main(
 
     // x+
     for (var w: u32 = 1; w < VPS; w++) {
-        let i = index_to_lin(vec3(w, local_id.x,local_id.y));
-        let i_p = index_to_lin(vec3(w-1, local_id.x,local_id.y));
+        let i = index_to_lin(vec3(w, local_id.x, local_id.y));
+        let i_p = index_to_lin(vec3(w-1, local_id.x, local_id.y));
 
         var voxel = voxel_wg_data[i];
         var parent_voxel = voxel_wg_data[i_p];
@@ -117,8 +117,8 @@ fn main(
 
     // x-
     for (var w: u32 = VPS - 1; w > 0; w--) {
-        let i = index_to_lin(vec3(w-1, local_id.x,local_id.y));
-        let i_p = index_to_lin(vec3(w, local_id.x,local_id.y));
+        let i = index_to_lin(vec3(w-1, local_id.x, local_id.y));
+        let i_p = index_to_lin(vec3(w, local_id.x, local_id.y));
 
         var voxel = voxel_wg_data[i];
         var parent_voxel = voxel_wg_data[i_p];
@@ -135,8 +135,8 @@ fn main(
 
     // y+
     for (var w: u32 = 1; w < VPS; w++) {
-        let i = index_to_lin(vec3(local_id.x,w,local_id.y));
-        let i_p = index_to_lin(vec3(local_id.x,w-1,local_id.y));
+        let i = index_to_lin(vec3(local_id.x, w, local_id.y));
+        let i_p = index_to_lin(vec3(local_id.x, w-1, local_id.y));
 
         var voxel = voxel_wg_data[i];
         var parent_voxel = voxel_wg_data[i_p];
@@ -153,8 +153,8 @@ fn main(
 
     // y-
     for (var w: u32 = VPS - 1; w > 0; w--) {
-        let i = index_to_lin(vec3(local_id.x,w-1,local_id.y));
-        let i_p = index_to_lin(vec3(local_id.x,w,local_id.y));
+        let i = index_to_lin(vec3(local_id.x, w-1, local_id.y));
+        let i_p = index_to_lin(vec3(local_id.x, w, local_id.y));
 
         var voxel = voxel_wg_data[i];
         var parent_voxel = voxel_wg_data[i_p];
@@ -171,7 +171,7 @@ fn main(
     
     // writeback (shared to global memory)
     for (var w: u32 = 0; w < VPS; w++) {
-        let i = index_to_lin(vec3(local_id.x,local_id.y,w));
+        let i = index_to_lin(vec3(local_id.x, local_id.y, w));
 
         block_voxels[block_id].voxels[i] = voxel_wg_data[i];
     }
