@@ -34,7 +34,7 @@ impl EsdfIntegrator {
 
     pub async fn update_blocks<
         const VPS: usize,
-        F: FnMut(&str, &Layer<Tsdf, VPS>, &Layer<Esdf, VPS>, &BlockIndex<VPS>),
+        F: FnMut(&str, &Layer<Tsdf, VPS>, &Layer<Esdf, VPS>, &[BlockIndex<VPS>]),
     >(
         &mut self,
         tsdf_layer: &Layer<Tsdf, VPS>,
@@ -114,7 +114,7 @@ impl EsdfIntegrator {
                 esdf_lock.reset_voxels();
             }
 
-            callback("clear site", tsdf_layer, esdf_layer, block_index);
+            callback("clear site", tsdf_layer, esdf_layer, &[*block_index]);
         }
 
         // transfer tsdf to esdf
@@ -155,13 +155,9 @@ impl EsdfIntegrator {
             //     propagate_blocks.insert(block_index);
             // }
             Self::sweep_gpu(esdf_layer, device, queue, &dirty_blocks).await;
+            let indices: Vec<_> = dirty_blocks.iter().copied().collect();
             propagate_blocks = dirty_blocks.clone();
-            callback(
-                "sweep: gpu",
-                tsdf_layer,
-                esdf_layer,
-                &BlockIndex(point![0, 0, 0]),
-            );
+            callback("sweep: gpu", tsdf_layer, esdf_layer, &indices);
             dirty_blocks.clear();
 
             while let Some(block_index) = propagate_blocks.pop_first() {
@@ -169,28 +165,28 @@ impl EsdfIntegrator {
                     Self::propagate_to_neighbour(OpDir::XPlus, &block_index, esdf_layer)
                 {
                     dirty_blocks.insert(dirty_block_index);
-                    callback("prop.: x+", tsdf_layer, esdf_layer, &dirty_block_index);
+                    callback("prop.: x+", tsdf_layer, esdf_layer, &[dirty_block_index]);
                 }
 
                 if let Some(dirty_block_index) =
                     Self::propagate_to_neighbour(OpDir::XMinus, &block_index, esdf_layer)
                 {
                     dirty_blocks.insert(dirty_block_index);
-                    callback("prop.: x-", tsdf_layer, esdf_layer, &dirty_block_index);
+                    callback("prop.: x-", tsdf_layer, esdf_layer, &[dirty_block_index]);
                 }
 
                 if let Some(dirty_block_index) =
                     Self::propagate_to_neighbour(OpDir::YPlus, &block_index, esdf_layer)
                 {
                     dirty_blocks.insert(dirty_block_index);
-                    callback("prop.: y+", tsdf_layer, esdf_layer, &dirty_block_index);
+                    callback("prop.: y+", tsdf_layer, esdf_layer, &[dirty_block_index]);
                 }
 
                 if let Some(dirty_block_index) =
                     Self::propagate_to_neighbour(OpDir::YMinus, &block_index, esdf_layer)
                 {
                     dirty_blocks.insert(dirty_block_index);
-                    callback("prop.: y-", tsdf_layer, esdf_layer, &dirty_block_index);
+                    callback("prop.: y-", tsdf_layer, esdf_layer, &[dirty_block_index]);
                 }
             }
         }

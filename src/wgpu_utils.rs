@@ -328,7 +328,7 @@ pub async fn sweep_blocks<const VPS: usize>(
 
     let bytes: &[u8] = &block_info_readback_buffer.slice(..).get_mapped_range();
     let block_info: &[BlockInfo] = bytemuck::cast_slice(bytes);
-    dbg!(block_info);
+    // dbg!(block_info);
 
     // writeback
     for (block, voxel_data) in blocks.iter().zip(voxel_blocks) {

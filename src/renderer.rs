@@ -1,9 +1,7 @@
-use std::{hash::Hash, time::Duration};
-
 use ab_glyph::{FontArc, PxScale};
 use image::{buffer::ConvertBuffer, Delay, RgbImage};
 use imageproc::drawing::draw_text_mut;
-use nalgebra::{point, Point3, Vector3};
+use nalgebra::{point, Vector3};
 
 use crate::core::{
     color::rainbow_map,
@@ -38,7 +36,7 @@ impl Renderer {
         &mut self,
         tsdf_layer: &Layer<Tsdf, VPS>,
         esdf_layer: &Layer<Esdf, VPS>,
-        block_of_interest: Option<&BlockIndex<VPS>>,
+        blocks_of_interest: &[BlockIndex<VPS>],
         op: &str,
         duration: Option<std::time::Duration>,
     ) {
@@ -140,7 +138,7 @@ impl Renderer {
         }
 
         // render frame around block of interest
-        if let Some(block_of_interest) = block_of_interest {
+        for block_of_interest in blocks_of_interest {
             for vx in 0..=VPS + 1 {
                 img.get_pixel_mut(
                     (vx + block_of_interest.x as usize * VPS + block_of_interest.x as usize) as u32,

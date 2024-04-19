@@ -49,11 +49,11 @@ async fn run() {
             &dirty_blocks,
             &device,
             &mut queue,
-            move |op, tsdf_layer, esdf_layer, block_index| {
+            move |op, tsdf_layer, esdf_layer, block_indices| {
                 renderer_cb.borrow_mut().render_tsdf_layer(
                     tsdf_layer,
                     esdf_layer,
-                    Some(block_index),
+                    block_indices,
                     op,
                     None,
                 );
@@ -64,7 +64,7 @@ async fn run() {
     renderer.borrow_mut().render_tsdf_layer(
         &tsdf_layer,
         &esdf_layer,
-        None,
+        &[],
         "",
         Some(std::time::Duration::from_secs(2)),
     );
@@ -88,11 +88,11 @@ async fn run() {
             &dirty_blocks,
             &device,
             &mut queue,
-            move |op, tsdf_layer, esdf_layer, block_index| {
+            move |op, tsdf_layer, esdf_layer, block_indices| {
                 renderer_cb.borrow_mut().render_tsdf_layer(
                     tsdf_layer,
                     esdf_layer,
-                    Some(block_index),
+                    block_indices,
                     op,
                     None,
                 );
@@ -103,7 +103,7 @@ async fn run() {
     renderer.borrow_mut().render_tsdf_layer(
         &tsdf_layer,
         &esdf_layer,
-        None,
+        &[],
         "",
         Some(std::time::Duration::from_secs(4)),
     );
