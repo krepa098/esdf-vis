@@ -1,4 +1,8 @@
-const VPS: u32 = 16u;
+// VPS=4  | the fastest, many blocks
+// VPS=8  | still fast, fewer blocks
+// VPS=16 | slowest, does not work with shared memory
+//
+const VPS: u32 = 8u;
 const VoxelSize: f32 = 1.0;
 
 // flags
@@ -26,7 +30,6 @@ struct Block {
 struct BlockInfo {
     flags: atomic<u32>,
     updated_voxels: atomic<u32>,
-    // _pad: array<u32, 2>,
 };
 
 // vars
@@ -75,15 +78,16 @@ fn update_voxel(voxel: ptr<function, EsdfVoxel>, parent_voxel: ptr<function, Esd
 
 // main
 @compute 
-@workgroup_size(VPS,VPS,1) // multiple of 32
+@workgroup_size(VPS,VPS,1) // multiple of 32 (NV) or 64 (AMD)
 fn main(
-    // @builtin(global_invocation_id) global_id: vec3<u32>,
     @builtin(local_invocation_id) local_id: vec3<u32>,
-    // @builtin(local_invocation_index) local_index: u32,
     @builtin(workgroup_id) workgroup_id: vec3<u32>,
 ) {
     let block_id = workgroup_id.x;
 
+    // note: from tests this improves
+    // performance by a factor of 1.5
+    //
     // fetch (global to shared memory)
     for (var w: u32 = 0; w < VPS; w++) {
         let i = index_to_lin(vec3(local_id.x,local_id.y,w));
@@ -147,7 +151,7 @@ fn main(
 
     workgroupBarrier();
 
-    // y- and writeback
+    // y-
     for (var w: u32 = VPS - 1; w > 0; w--) {
         let i = index_to_lin(vec3(local_id.x,w-1,local_id.y));
         let i_p = index_to_lin(vec3(local_id.x,w,local_id.y));
