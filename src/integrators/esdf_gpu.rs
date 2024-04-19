@@ -142,23 +142,13 @@ impl EsdfIntegrator {
         }
 
         while !dirty_blocks.is_empty() {
-            // while let Some(block_index) = dirty_blocks.pop_first() {
-            //     // Self::sweep_block(OpDir::XPlus, &block_index, esdf_layer);
-            //     // callback("sweep: x+", tsdf_layer, esdf_layer, &block_index);
-            //     // Self::sweep_block(OpDir::XMinus, &block_index, esdf_layer);
-            //     // callback("sweep: x-", tsdf_layer, esdf_layer, &block_index);
-            //     // Self::sweep_block(OpDir::YPlus, &block_index, esdf_layer);
-            //     // callback("sweep: y+", tsdf_layer, esdf_layer, &block_index);
-            //     // Self::sweep_block(OpDir::YMinus, &block_index, esdf_layer);
-            //     // callback("sweep: y-", tsdf_layer, esdf_layer, &block_index);
-
-            //     propagate_blocks.insert(block_index);
-            // }
+            // sweep
+            propagate_blocks = dirty_blocks.clone();
             Self::sweep_gpu(esdf_layer, device, queue, &dirty_blocks).await;
             let indices: Vec<_> = dirty_blocks.iter().copied().collect();
-            propagate_blocks = dirty_blocks.clone();
-            callback("sweep: gpu", tsdf_layer, esdf_layer, &indices);
             dirty_blocks.clear();
+
+            callback("sweep: xy (GPU)", tsdf_layer, esdf_layer, &indices);
 
             while let Some(block_index) = propagate_blocks.pop_first() {
                 if let Some(dirty_block_index) =

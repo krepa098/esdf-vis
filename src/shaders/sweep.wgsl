@@ -41,7 +41,7 @@ var<storage, read_write> block_voxels: array<Block>;
 @binding(1) 
 var<storage, read_write> block_info: array<BlockInfo>;
 
-var<workgroup> voxel_wg_data: array<EsdfVoxel, (VPS*VPS*VPS)>;
+var<workgroup> voxel_data_wg: array<EsdfVoxel, (VPS*VPS*VPS)>;
 
 // helpers
 fn index_to_lin(index: vec3<u32>) -> u32 {
@@ -92,7 +92,7 @@ fn main(
     for (var w: u32 = 0; w < VPS; w++) {
         let i = index_to_lin(vec3(local_id.x, local_id.y, w));
 
-        voxel_wg_data[i] = block_voxels[block_id].voxels[i];
+        voxel_data_wg[i] = block_voxels[block_id].voxels[i];
     }
 
     workgroupBarrier();
@@ -102,15 +102,15 @@ fn main(
         let i = index_to_lin(vec3(w, local_id.x, local_id.y));
         let i_p = index_to_lin(vec3(w-1, local_id.x, local_id.y));
 
-        var voxel = voxel_wg_data[i];
-        var parent_voxel = voxel_wg_data[i_p];
+        var voxel = voxel_data_wg[i];
+        var parent_voxel = voxel_data_wg[i_p];
 
         if (update_voxel(&voxel, &parent_voxel)) {
             atomicAdd(&block_info[block_id].updated_voxels, 1u);
             atomicOr(&block_info[block_id].flags, SpilledXPLus);
         }
 
-        voxel_wg_data[i] = voxel;
+        voxel_data_wg[i] = voxel;
     }
 
     workgroupBarrier();
@@ -120,15 +120,15 @@ fn main(
         let i = index_to_lin(vec3(w-1, local_id.x, local_id.y));
         let i_p = index_to_lin(vec3(w, local_id.x, local_id.y));
 
-        var voxel = voxel_wg_data[i];
-        var parent_voxel = voxel_wg_data[i_p];
+        var voxel = voxel_data_wg[i];
+        var parent_voxel = voxel_data_wg[i_p];
 
         if (update_voxel(&voxel, &parent_voxel)) {
             atomicAdd(&block_info[block_id].updated_voxels, 1u);
             atomicOr(&block_info[block_id].flags, SpilledXMinus);
         }
 
-        voxel_wg_data[i] = voxel;
+        voxel_data_wg[i] = voxel;
     }
 
     workgroupBarrier();
@@ -138,15 +138,15 @@ fn main(
         let i = index_to_lin(vec3(local_id.x, w, local_id.y));
         let i_p = index_to_lin(vec3(local_id.x, w-1, local_id.y));
 
-        var voxel = voxel_wg_data[i];
-        var parent_voxel = voxel_wg_data[i_p];
+        var voxel = voxel_data_wg[i];
+        var parent_voxel = voxel_data_wg[i_p];
 
         if (update_voxel(&voxel, &parent_voxel)) {
             atomicAdd(&block_info[block_id].updated_voxels, 1u);
             atomicOr(&block_info[block_id].flags, SpilledYPlus);
         }
 
-        voxel_wg_data[i] = voxel;
+        voxel_data_wg[i] = voxel;
     }
 
     workgroupBarrier();
@@ -156,15 +156,15 @@ fn main(
         let i = index_to_lin(vec3(local_id.x, w-1, local_id.y));
         let i_p = index_to_lin(vec3(local_id.x, w, local_id.y));
 
-        var voxel = voxel_wg_data[i];
-        var parent_voxel = voxel_wg_data[i_p];
+        var voxel = voxel_data_wg[i];
+        var parent_voxel = voxel_data_wg[i_p];
 
         if (update_voxel(&voxel, &parent_voxel)) {
             atomicAdd(&block_info[block_id].updated_voxels, 1u);
             atomicOr(&block_info[block_id].flags, SpilledYMinus);
         }
 
-        voxel_wg_data[i] = voxel;
+        voxel_data_wg[i] = voxel;
     }
 
     workgroupBarrier();
@@ -173,7 +173,7 @@ fn main(
     for (var w: u32 = 0; w < VPS; w++) {
         let i = index_to_lin(vec3(local_id.x, local_id.y, w));
 
-        block_voxels[block_id].voxels[i] = voxel_wg_data[i];
+        block_voxels[block_id].voxels[i] = voxel_data_wg[i];
     }
 }
 
