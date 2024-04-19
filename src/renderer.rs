@@ -3,13 +3,13 @@ use std::{hash::Hash, time::Duration};
 use ab_glyph::{FontArc, PxScale};
 use image::{buffer::ConvertBuffer, Delay, RgbImage};
 use imageproc::drawing::draw_text_mut;
-use nalgebra::point;
+use nalgebra::{point, Point3, Vector3};
 
 use crate::core::{
     color::rainbow_map,
     index::{BlockIndex, GlobalIndex, VoxelIndex},
     layer::Layer,
-    voxel::{Esdf, Tsdf},
+    voxel::{Esdf, EsdfGpuFlags, Tsdf},
 };
 
 static COLOR_OF_INTEREST: [u8; 3] = [255, 0, 255];
@@ -82,16 +82,19 @@ impl Renderer {
                             let lock = block.read();
                             let voxel = lock.voxel_from_index(&voxel_index);
 
-                            if voxel.fixed {
+                            if voxel.flags.contains(EsdfGpuFlags::Fixed) {
                                 let index = GlobalIndex::from_block_and_voxel_index(
                                     block_index,
                                     &voxel_index,
                                 );
 
                                 let color = if self.sites {
-                                    rainbow_map(voxel.site_block_index.map_or(0.0, |index| {
-                                        index.cast::<f32>().norm_squared() / 16.0
-                                    }))
+                                    rainbow_map(
+                                        Vector3::from_column_slice(&voxel.site_block_index)
+                                            .cast::<f32>()
+                                            .norm_squared()
+                                            / 16.0,
+                                    )
                                 } else {
                                     rainbow_map(((voxel.distance - d_min) / d_range) as f32)
                                 };

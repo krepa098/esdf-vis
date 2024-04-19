@@ -1,4 +1,4 @@
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct VoxelStorage<T, const H: usize, const W: usize, const D: usize>(pub [[[T; H]; W]; D]);
 
 impl<T, const H: usize, const W: usize, const D: usize> VoxelStorage<T, H, W, D> {

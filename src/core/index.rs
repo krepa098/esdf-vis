@@ -1,4 +1,7 @@
-use std::ops::{Add, Deref, Sub};
+use std::{
+    hash::{Hash, Hasher},
+    ops::{Add, Deref, Sub},
+};
 
 use super::{prelude::*, utils::grid_index_from_point};
 
@@ -8,7 +11,7 @@ impl<const VPS: usize> GridIndex for GlobalIndex<VPS> {}
 impl<const VPS: usize> GridIndex for BlockIndex<VPS> {}
 
 /// Global Index
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GlobalIndex<const VPS: usize>(pub Point3<i64>);
 
 impl<const VPS: usize> Deref for GlobalIndex<VPS> {
@@ -169,7 +172,7 @@ impl<'a, T: From<Point3<i64>> + Into<Point3<i64>> + Copy> Iterator for IndexNeig
 }
 
 /// Voxel Index
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VoxelIndex<const VPS: usize>(pub Point3<usize>);
 
 impl<const VPS: usize> Deref for VoxelIndex<VPS> {
@@ -187,7 +190,7 @@ impl<const VPS: usize> VoxelIndex<VPS> {
 }
 
 /// Block Index
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BlockIndex<const VPS: usize>(pub Point3<i32>);
 
 impl<const VPS: usize> BlockIndex<VPS> {
@@ -223,14 +226,31 @@ impl<const VPS: usize> From<BlockIndex<VPS>> for Point3<i64> {
 }
 
 impl<const VPS: usize> BlockIndex<VPS> {
-    pub fn hash32(&self) -> i32 {
-        (self.x * 18397) + (self.y * 20483) + (self.z * 29303)
+    pub fn deco_hash(&self) -> u64 {
+        // Buckley, Léonie, Jonathan Byrne, and David Moloney.
+        // "Investigating the Impact of Suboptimal Hashing Functions."
+        // 2018 IEEE Games, Entertainment, Media Conference (GEM). IEEE, 2018.
+        //
+        // DECO hashing
+        // locality preserving mapping - voxels close
+        // to each other in the multidimensional space will be close to
+        // each other in the onedimensional space
+        const SL: u64 = 17191;
+        const SL2: u64 = SL * SL;
+        (self.x as u64)
+            .overflowing_add(
+                (self.y as u64)
+                    .wrapping_mul(SL)
+                    .overflowing_add((self.z as u64).wrapping_mul(SL2))
+                    .0,
+            )
+            .0
     }
 }
 
 impl<const VPS: usize> Ord for BlockIndex<VPS> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.hash32().cmp(&other.hash32())
+        self.deco_hash().cmp(&other.deco_hash())
     }
 }
 

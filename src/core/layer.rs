@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use super::prelude::*;
 
@@ -9,7 +9,7 @@ pub struct Layer<VoxelType: Voxel, const VPS: usize> {
     block_size_inv: Real,
     voxel_size: Real,
     voxel_size_inv: Real,
-    blocks: HashMap<BlockIndex<VPS>, Block<VoxelType, VPS>>,
+    blocks: BTreeMap<BlockIndex<VPS>, Block<VoxelType, VPS>>,
 }
 
 impl<VoxelType: Voxel + Copy, const VPS: usize> Layer<VoxelType, VPS> {
@@ -23,7 +23,7 @@ impl<VoxelType: Voxel + Copy, const VPS: usize> Layer<VoxelType, VPS> {
             block_size_inv,
             voxel_size,
             voxel_size_inv,
-            blocks: HashMap::new(),
+            blocks: BTreeMap::new(),
         }
     }
 

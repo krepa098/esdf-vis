@@ -1,20 +1,27 @@
-use core::index::BlockIndex;
 use std::collections::BTreeSet;
 
 use integrators::{
-    esdf::{EsdfIntegrator, EsdfIntegratorConfig},
+    esdf_gpu::{EsdfIntegrator, EsdfIntegratorConfig},
     tsdf::{TsdfIntegrator, TsdfIntegratorConfig},
 };
+
 use renderer::Renderer;
 
 mod core;
 mod integrators;
 mod renderer;
+mod wgpu_utils;
 
-type TsdfLayer = core::layer::Layer<core::voxel::Tsdf, 16>;
-type EsdfLayer = core::layer::Layer<core::voxel::Esdf, 16>;
+type TsdfLayer = core::layer::Layer<core::voxel::Tsdf, 8>;
+type EsdfLayer = core::layer::Layer<core::voxel::Esdf, 8>;
 
 fn main() {
+    futures::executor::block_on(run());
+}
+
+async fn run() {
+    let (device, mut queue) = wgpu_utils::create_adapter().await.unwrap();
+
     let map_img = image::io::Reader::open(format!("{}/maps/map3.png", env!("CARGO_MANIFEST_DIR")))
         .unwrap()
         .decode()
@@ -27,7 +34,7 @@ fn main() {
     let mut esdf_layer = EsdfLayer::new(1.0);
     let mut esdf_integrator = EsdfIntegrator::new(EsdfIntegratorConfig::default());
 
-    let renderer = std::rc::Rc::new(std::cell::RefCell::new(Renderer::new(true)));
+    let renderer = std::rc::Rc::new(std::cell::RefCell::new(Renderer::new(false)));
 
     // map to tsdf
     let mut dirty_blocks = BTreeSet::new();
@@ -35,20 +42,24 @@ fn main() {
 
     // generate esdf and render on callback
     let renderer_cb = renderer.clone();
-    esdf_integrator.update_blocks(
-        &tsdf_layer,
-        &mut esdf_layer,
-        &dirty_blocks,
-        move |op, tsdf_layer, esdf_layer, block_index| {
-            renderer_cb.borrow_mut().render_tsdf_layer(
-                tsdf_layer,
-                esdf_layer,
-                Some(block_index),
-                op,
-                None,
-            );
-        },
-    );
+    esdf_integrator
+        .update_blocks(
+            &tsdf_layer,
+            &mut esdf_layer,
+            &dirty_blocks,
+            &device,
+            &mut queue,
+            move |op, tsdf_layer, esdf_layer, block_index| {
+                renderer_cb.borrow_mut().render_tsdf_layer(
+                    tsdf_layer,
+                    esdf_layer,
+                    Some(block_index),
+                    op,
+                    None,
+                );
+            },
+        )
+        .await;
 
     renderer.borrow_mut().render_tsdf_layer(
         &tsdf_layer,
@@ -70,20 +81,24 @@ fn main() {
 
     // generate esdf and render on callback
     let renderer_cb = renderer.clone();
-    esdf_integrator.update_blocks(
-        &tsdf_layer,
-        &mut esdf_layer,
-        &dirty_blocks,
-        move |op, tsdf_layer, esdf_layer, block_index| {
-            renderer_cb.borrow_mut().render_tsdf_layer(
-                tsdf_layer,
-                esdf_layer,
-                Some(block_index),
-                op,
-                None,
-            );
-        },
-    );
+    esdf_integrator
+        .update_blocks(
+            &tsdf_layer,
+            &mut esdf_layer,
+            &dirty_blocks,
+            &device,
+            &mut queue,
+            move |op, tsdf_layer, esdf_layer, block_index| {
+                renderer_cb.borrow_mut().render_tsdf_layer(
+                    tsdf_layer,
+                    esdf_layer,
+                    Some(block_index),
+                    op,
+                    None,
+                );
+            },
+        )
+        .await;
 
     renderer.borrow_mut().render_tsdf_layer(
         &tsdf_layer,

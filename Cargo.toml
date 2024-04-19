@@ -13,3 +13,11 @@ parking_lot = "0.12.1"
 image = "0.25.1"
 imageproc = "0.24.0"
 ab_glyph = "0.2.24"
+wgpu = "0.19.3"
+bytemuck = { version = "1.15.0", features = [
+    "derive",
+    "min_const_generics",
+    "extern_crate_alloc",
+] }
+futures = "0.3.30"
+bitflags = { version = "2.5.0", features = ["bytemuck"] }
