@@ -98,8 +98,20 @@ impl<const VPS: usize> GlobalIndex<VPS> {
         )
     }
 
-    pub fn neighbours(&self) -> IndexNeighbourIter<GlobalIndex<VPS>> {
-        IndexNeighbourIter { pivot: self, n: 0 }
+    pub fn neighbors(&self) -> IndexNeighborIter<GlobalIndex<VPS>> {
+        IndexNeighborIter {
+            pivot: self,
+            n: 0,
+            count: 26,
+        }
+    }
+
+    pub fn neighbors6(&self) -> IndexNeighborIter<GlobalIndex<VPS>> {
+        IndexNeighborIter {
+            pivot: self,
+            n: 0,
+            count: 6,
+        }
     }
 }
 
@@ -109,9 +121,10 @@ impl<const VPS: usize> From<Point3<i64>> for GlobalIndex<VPS> {
     }
 }
 
-pub struct IndexNeighbourIter<'a, T> {
+pub struct IndexNeighborIter<'a, T> {
     pivot: &'a T,
     n: usize,
+    count: usize,
 }
 
 pub struct Neighbour<T> {
@@ -120,13 +133,13 @@ pub struct Neighbour<T> {
     pub grid_dist: Real,
 }
 
-impl<'a, T: From<Point3<i64>> + Into<Point3<i64>> + Copy> Iterator for IndexNeighbourIter<'a, T> {
+impl<'a, T: From<Point3<i64>> + Into<Point3<i64>> + Copy> Iterator for IndexNeighborIter<'a, T> {
     type Item = Neighbour<T>;
 
     fn next(&mut self) -> Option<Self::Item> {
         #[allow(clippy::approx_constant)]
-        const SQRT_2: Real = 1.414213562;
-        const SQRT_3: Real = 1.732050808;
+        const SQRT_2: Real = 1.414_213_5;
+        const SQRT_3: Real = 1.732_050_8;
 
         const NEIGHBOUR_OFFSETS: [(Vector3<i64>, Real); 26] = [
             (Vector3::new(-1, 0, 0), 1.0),
@@ -157,6 +170,10 @@ impl<'a, T: From<Point3<i64>> + Into<Point3<i64>> + Copy> Iterator for IndexNeig
             (Vector3::new(1, 1, 1), SQRT_3),
         ];
 
+        if self.n == self.count {
+            return None;
+        }
+
         let pt: Point3<i64> = (*self.pivot).into();
 
         let offset = NEIGHBOUR_OFFSETS.get(self.n);
@@ -167,6 +184,7 @@ impl<'a, T: From<Point3<i64>> + Into<Point3<i64>> + Copy> Iterator for IndexNeig
         });
 
         self.n += 1;
+
         next
     }
 }
@@ -194,8 +212,20 @@ impl<const VPS: usize> VoxelIndex<VPS> {
 pub struct BlockIndex<const VPS: usize>(pub Point3<i32>);
 
 impl<const VPS: usize> BlockIndex<VPS> {
-    pub fn neighbours(&self) -> IndexNeighbourIter<BlockIndex<VPS>> {
-        IndexNeighbourIter { pivot: self, n: 0 }
+    pub fn neighbors(&self) -> IndexNeighborIter<BlockIndex<VPS>> {
+        IndexNeighborIter {
+            pivot: self,
+            n: 0,
+            count: 26,
+        }
+    }
+
+    pub fn neighbors6(&self) -> IndexNeighborIter<BlockIndex<VPS>> {
+        IndexNeighborIter {
+            pivot: self,
+            n: 0,
+            count: 6,
+        }
     }
 }
 
