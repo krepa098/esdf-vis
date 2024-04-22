@@ -44,6 +44,8 @@ impl EsdfIntegrator {
         queue: &mut wgpu::Queue,
         mut callback: F,
     ) {
+        let start = std::time::Instant::now();
+
         let mut dirty_blocks = BTreeSet::new();
         let mut sites_indices_to_clear = BTreeSet::new();
         let mut blocks_to_clear = updated_blocks.clone();
@@ -169,6 +171,11 @@ impl EsdfIntegrator {
                 Duration::from_millis(1000),
             );
         }
+
+        println!(
+            "ESDF update finished in {:?}",
+            std::time::Instant::now().duration_since(start)
+        );
     }
 
     fn sweep_block<const VPS: usize>(
