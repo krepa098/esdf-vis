@@ -320,11 +320,14 @@ pub async fn sweep_blocks<const VPS: usize>(
 
     let voxel_blocks: Vec<_> = data.chunks(VPS * VPS * VPS).collect();
 
-    println!("GPU sweep: Updated {} blocks", blocks.len());
-
     let bytes: &[u8] = &timestamp_readback_buffer.slice(..).get_mapped_range();
     let counts: &[u64; 2] = bytemuck::from_bytes(bytes);
-    dbg!(TimestampGpu::new(counts, queue).duration());
+
+    println!(
+        "GPU sweep:\t{} blocks\t{:?}",
+        blocks.len(),
+        TimestampGpu::new(counts, queue).duration()
+    );
 
     let bytes: &[u8] = &block_info_readback_buffer.slice(..).get_mapped_range();
     let block_info: &[BlockInfo] = bytemuck::cast_slice(bytes);
@@ -561,11 +564,14 @@ pub async fn propagate_blocks<const VPS: usize>(
     let bytes: &[u8] = &voxel_readback_buffer.slice(..).get_mapped_range();
     let voxel_data: &[Esdf] = bytemuck::cast_slice(bytes);
 
-    println!("GPU propgate: Updated {} blocks", blocks.len());
-
     let bytes: &[u8] = &timestamp_readback_buffer.slice(..).get_mapped_range();
     let counts: &[u64; 2] = bytemuck::from_bytes(bytes);
-    dbg!(TimestampGpu::new(counts, queue).duration());
+
+    println!(
+        "GPU propagate:\t{} blocks\t{:?}",
+        blocks.len(),
+        TimestampGpu::new(counts, queue).duration()
+    );
 
     let bytes: &[u8] = &block_info_readback_buffer.slice(..).get_mapped_range();
     let block_info: &[BlockInfo] = bytemuck::cast_slice(bytes);
