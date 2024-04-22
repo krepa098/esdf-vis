@@ -49,17 +49,20 @@ fn index_to_lin(index: vec3<u32>) -> u32 {
     return index.x + VPS * (index.y + index.z * VPS);
 }
 
-fn is_fixed(voxel: ptr<function, EsdfVoxel>) -> bool {
-    return ((*voxel).flags & Fixed) > 0;
+fn is_fixed(flags: u32) -> bool {
+    return (flags & Fixed) > 0;
 }
 
-fn is_observed(voxel: ptr<function, EsdfVoxel>) -> bool {
-    return ((*voxel).flags & Observed) > 0;
+fn is_observed(flags: u32) -> bool {
+    return (flags & Observed) > 0;
 }
 
-fn update_voxel(voxel: ptr<function, EsdfVoxel>, parent_voxel: ptr<function, EsdfVoxel>) -> bool {  
-    if (is_fixed(parent_voxel) && !is_observed(voxel)) {
-        if (!is_fixed(voxel)) {
+fn update_voxel(voxel_index: u32, parent_voxel_index: u32) -> bool {  
+    let voxel = &(voxel_data_wg[voxel_index]);
+    let parent_voxel = &(voxel_data_wg[parent_voxel_index]);
+
+    if (is_fixed((*parent_voxel).flags) && !is_observed((*voxel).flags)) {
+        if (!is_fixed((*voxel).flags)) {
             (*voxel).distance = (*parent_voxel).distance + VoxelSize;
             (*voxel).flags |= Fixed | HasSiteIndex;
             (*voxel).site_block_index = (*parent_voxel).site_block_index;
@@ -103,15 +106,10 @@ fn main(
         let i = index_to_lin(vec3(w, local_id.x, local_id.y));
         let i_p = index_to_lin(vec3(w-1, local_id.x, local_id.y));
 
-        var voxel = voxel_data_wg[i];
-        var parent_voxel = voxel_data_wg[i_p];
-
-        if (update_voxel(&voxel, &parent_voxel)) {
+        if (update_voxel(i, i_p)) {
             atomicAdd(&block_info[block_id].updated_voxels, 1u);
             atomicOr(&block_info[block_id].flags, SpilledXPLus);
         }
-
-        voxel_data_wg[i] = voxel;
     }
 
     workgroupBarrier();
@@ -121,15 +119,10 @@ fn main(
         let i = index_to_lin(vec3(w-1, local_id.x, local_id.y));
         let i_p = index_to_lin(vec3(w, local_id.x, local_id.y));
 
-        var voxel = voxel_data_wg[i];
-        var parent_voxel = voxel_data_wg[i_p];
-
-        if (update_voxel(&voxel, &parent_voxel)) {
+        if (update_voxel(i, i_p)) {
             atomicAdd(&block_info[block_id].updated_voxels, 1u);
             atomicOr(&block_info[block_id].flags, SpilledXMinus);
         }
-
-        voxel_data_wg[i] = voxel;
     }
 
     workgroupBarrier();
@@ -139,15 +132,10 @@ fn main(
         let i = index_to_lin(vec3(local_id.x, w, local_id.y));
         let i_p = index_to_lin(vec3(local_id.x, w-1, local_id.y));
 
-        var voxel = voxel_data_wg[i];
-        var parent_voxel = voxel_data_wg[i_p];
-
-        if (update_voxel(&voxel, &parent_voxel)) {
+        if (update_voxel(i, i_p)) {
             atomicAdd(&block_info[block_id].updated_voxels, 1u);
             atomicOr(&block_info[block_id].flags, SpilledYPlus);
         }
-
-        voxel_data_wg[i] = voxel;
     }
 
     workgroupBarrier();
@@ -157,15 +145,10 @@ fn main(
         let i = index_to_lin(vec3(local_id.x, w-1, local_id.y));
         let i_p = index_to_lin(vec3(local_id.x, w, local_id.y));
 
-        var voxel = voxel_data_wg[i];
-        var parent_voxel = voxel_data_wg[i_p];
-
-        if (update_voxel(&voxel, &parent_voxel)) {
+        if (update_voxel(i, i_p)) {
             atomicAdd(&block_info[block_id].updated_voxels, 1u);
             atomicOr(&block_info[block_id].flags, SpilledYMinus);
         }
-
-        voxel_data_wg[i] = voxel;
     }
 
     workgroupBarrier();
