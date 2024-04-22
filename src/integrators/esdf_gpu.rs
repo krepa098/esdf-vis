@@ -94,7 +94,7 @@ impl EsdfIntegrator {
                 }
 
                 // also explore its neighbours
-                for neighbour in index.neighbours() {
+                for neighbour in index.neighbors() {
                     if !closed_list.contains(&neighbour.index)
                         && esdf_layer.block_by_index(&neighbour.index).is_some()
                     {
@@ -114,7 +114,7 @@ impl EsdfIntegrator {
                 esdf_lock.reset_voxels();
             }
 
-            callback("clear site", tsdf_layer, esdf_layer, &[*block_index]);
+            //callback("clear site", tsdf_layer, esdf_layer, &[*block_index]);
         }
 
         // transfer tsdf to esdf
@@ -141,6 +141,7 @@ impl EsdfIntegrator {
             }
         }
 
+        let mut k = 0;
         while !dirty_blocks.is_empty() {
             // sweep
             propagate_blocks = dirty_blocks.clone();
@@ -150,35 +151,46 @@ impl EsdfIntegrator {
 
             callback("sweep: xy (GPU)", tsdf_layer, esdf_layer, &indices);
 
-            while let Some(block_index) = propagate_blocks.pop_first() {
-                if let Some(dirty_block_index) =
-                    Self::propagate_to_neighbour(OpDir::XPlus, &block_index, esdf_layer)
-                {
-                    dirty_blocks.insert(dirty_block_index);
-                    callback("prop.: x+", tsdf_layer, esdf_layer, &[dirty_block_index]);
-                }
+            dirty_blocks = Self::propagate_gpu(esdf_layer, device, queue, &propagate_blocks).await;
+            propagate_blocks.clear();
+            callback("prop.: xy (GPU)", tsdf_layer, esdf_layer, &[]);
 
-                if let Some(dirty_block_index) =
-                    Self::propagate_to_neighbour(OpDir::XMinus, &block_index, esdf_layer)
-                {
-                    dirty_blocks.insert(dirty_block_index);
-                    callback("prop.: x-", tsdf_layer, esdf_layer, &[dirty_block_index]);
-                }
+            k += 1;
 
-                if let Some(dirty_block_index) =
-                    Self::propagate_to_neighbour(OpDir::YPlus, &block_index, esdf_layer)
-                {
-                    dirty_blocks.insert(dirty_block_index);
-                    callback("prop.: y+", tsdf_layer, esdf_layer, &[dirty_block_index]);
-                }
-
-                if let Some(dirty_block_index) =
-                    Self::propagate_to_neighbour(OpDir::YMinus, &block_index, esdf_layer)
-                {
-                    dirty_blocks.insert(dirty_block_index);
-                    callback("prop.: y-", tsdf_layer, esdf_layer, &[dirty_block_index]);
-                }
+            if k > 10 {
+                break;
             }
+
+            // prop
+            // while let Some(block_index) = propagate_blocks.pop_first() {
+            //     if let Some(dirty_block_index) =
+            //         Self::propagate_to_neighbour(OpDir::XPlus, &block_index, esdf_layer)
+            //     {
+            //         dirty_blocks.insert(dirty_block_index);
+            //         callback("prop.: x+", tsdf_layer, esdf_layer, &[dirty_block_index]);
+            //     }
+
+            //     if let Some(dirty_block_index) =
+            //         Self::propagate_to_neighbour(OpDir::XMinus, &block_index, esdf_layer)
+            //     {
+            //         dirty_blocks.insert(dirty_block_index);
+            //         callback("prop.: x-", tsdf_layer, esdf_layer, &[dirty_block_index]);
+            //     }
+
+            //     if let Some(dirty_block_index) =
+            //         Self::propagate_to_neighbour(OpDir::YPlus, &block_index, esdf_layer)
+            //     {
+            //         dirty_blocks.insert(dirty_block_index);
+            //         callback("prop.: y+", tsdf_layer, esdf_layer, &[dirty_block_index]);
+            //     }
+
+            //     if let Some(dirty_block_index) =
+            //         Self::propagate_to_neighbour(OpDir::YMinus, &block_index, esdf_layer)
+            //     {
+            //         dirty_blocks.insert(dirty_block_index);
+            //         callback("prop.: y-", tsdf_layer, esdf_layer, &[dirty_block_index]);
+            //     }
+            // }
         }
     }
 
@@ -328,6 +340,55 @@ impl EsdfIntegrator {
             .collect();
 
         wgpu_utils::sweep_blocks(device, queue, blocks.as_slice()).await;
+    }
+
+    async fn propagate_gpu<const VPS: usize>(
+        esdf_layer: &mut Layer<Esdf, VPS>,
+        device: &wgpu::Device,
+        queue: &mut wgpu::Queue,
+        dirty_blocks: &BTreeSet<BlockIndex<VPS>>,
+    ) -> BTreeSet<BlockIndex<VPS>> {
+        let block_indices_of_interest = BTreeSet::from_iter(
+            dirty_blocks
+                .iter()
+                .flat_map(|index| index.neighbors6_include_self().map(|p| p.index))
+                .filter(|p| esdf_layer.has_index(p)),
+        );
+
+        let block_index_map = std::collections::BTreeMap::from_iter(
+            block_indices_of_interest
+                .iter()
+                .enumerate()
+                .map(|p| (p.1, p.0)),
+        );
+
+        let blocks: Vec<_> = block_indices_of_interest
+            .iter()
+            .filter_map(|p| esdf_layer.block_by_index(p))
+            .collect();
+
+        let workgroup_block_indices: Vec<u32> = dirty_blocks
+            .iter()
+            .flat_map(|p| {
+                p.neighbors6_include_self().map(|p| {
+                    block_index_map
+                        .get(&p.index)
+                        .copied()
+                        .map(|p| p as u32)
+                        .unwrap_or(u32::MAX) // MAX indicates an invalid index
+                })
+            })
+            .collect();
+
+        wgpu_utils::propagate_blocks(
+            device,
+            queue,
+            workgroup_block_indices.as_slice(),
+            blocks.as_slice(),
+        )
+        .await;
+
+        BTreeSet::from_iter(block_indices_of_interest.difference(dirty_blocks).copied())
     }
 }
 

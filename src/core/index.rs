@@ -141,13 +141,14 @@ impl<'a, T: From<Point3<i64>> + Into<Point3<i64>> + Copy> Iterator for IndexNeig
         const SQRT_2: Real = 1.414_213_5;
         const SQRT_3: Real = 1.732_050_8;
 
-        const NEIGHBOUR_OFFSETS: [(Vector3<i64>, Real); 26] = [
-            (Vector3::new(-1, 0, 0), 1.0),
+        const NEIGHBOUR_OFFSETS: [(Vector3<i64>, Real); 27] = [
+            (Vector3::new(0, 0, 0), 0.0), // self
             (Vector3::new(1, 0, 0), 1.0),
-            (Vector3::new(0, -1, 0), 1.0),
+            (Vector3::new(-1, 0, 0), 1.0),
             (Vector3::new(0, 1, 0), 1.0),
-            (Vector3::new(0, 0, -1), 1.0),
+            (Vector3::new(0, -1, 0), 1.0),
             (Vector3::new(0, 0, 1), 1.0),
+            (Vector3::new(0, 0, -1), 1.0),
             (Vector3::new(-1, -1, 0), SQRT_2),
             (Vector3::new(-1, 1, 0), SQRT_2),
             (Vector3::new(1, -1, 0), SQRT_2),
@@ -215,16 +216,24 @@ impl<const VPS: usize> BlockIndex<VPS> {
     pub fn neighbors(&self) -> IndexNeighborIter<BlockIndex<VPS>> {
         IndexNeighborIter {
             pivot: self,
-            n: 0,
-            count: 26,
+            n: 1,
+            count: 27,
         }
     }
 
     pub fn neighbors6(&self) -> IndexNeighborIter<BlockIndex<VPS>> {
         IndexNeighborIter {
             pivot: self,
+            n: 1,
+            count: 7,
+        }
+    }
+
+    pub fn neighbors6_include_self(&self) -> IndexNeighborIter<BlockIndex<VPS>> {
+        IndexNeighborIter {
+            pivot: self,
             n: 0,
-            count: 6,
+            count: 7,
         }
     }
 }
