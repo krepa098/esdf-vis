@@ -61,13 +61,13 @@ fn update_voxel(voxel: ptr<function, EsdfVoxel>, parent_voxel: ptr<function, Esd
     if (is_fixed(parent_voxel) && !is_observed(voxel)) {
         if (!is_fixed(voxel)) {
             (*voxel).distance = (*parent_voxel).distance + VoxelSize;
-            (*voxel).flags |= Fixed;
+            (*voxel).flags |= Fixed | HasSiteIndex;
             (*voxel).site_block_index = (*parent_voxel).site_block_index;
 
             return true;
 
         } else if ((*voxel).distance > (*parent_voxel).distance + VoxelSize) {
-            (*voxel).distance = min((*voxel).distance, (*parent_voxel).distance + VoxelSize);
+            (*voxel).distance = (*parent_voxel).distance + VoxelSize;
             (*voxel).site_block_index = (*parent_voxel).site_block_index;
 
             return true;

@@ -80,7 +80,7 @@ fn update_voxel(block_index: u32, voxel_index: u32, parent_block_index: u32, par
     if (is_parent_fixed && !is_voxel_observed) {
         if (!is_voxel_fixed) {
             (*voxel).distance = (*parent_voxel).distance + VoxelSize;
-            (*voxel).flags |= Fixed;
+            (*voxel).flags |= Fixed | HasSiteIndex;
             (*voxel).site_block_index = (*parent_voxel).site_block_index;
 
             return true;
