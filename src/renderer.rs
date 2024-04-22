@@ -7,7 +7,7 @@ use crate::core::{
     color::rainbow_map,
     index::{BlockIndex, GlobalIndex, VoxelIndex},
     layer::Layer,
-    voxel::{Esdf, EsdfGpuFlags, Tsdf},
+    voxel::{Esdf, EsdfFlags, Tsdf},
 };
 
 static COLOR_OF_INTEREST: [u8; 3] = [255, 0, 255];
@@ -80,7 +80,7 @@ impl Renderer {
                             let lock = block.read();
                             let voxel = lock.voxel_from_index(&voxel_index);
 
-                            if voxel.flags.contains(EsdfGpuFlags::Fixed) {
+                            if voxel.flags.contains(EsdfFlags::Fixed) {
                                 let index = GlobalIndex::from_block_and_voxel_index(
                                     block_index,
                                     &voxel_index,
@@ -198,7 +198,7 @@ impl Renderer {
 
         self.frames.push((
             img,
-            duration.unwrap_or(std::time::Duration::from_millis(100)),
+            duration.unwrap_or(std::time::Duration::from_millis(1000)),
         ));
     }
 

@@ -9,7 +9,7 @@ use crate::{
     wgpu_utils,
 };
 
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, time::Duration};
 
 #[derive(Default)]
 pub struct EsdfIntegratorConfig {}
@@ -34,7 +34,7 @@ impl EsdfIntegrator {
 
     pub async fn update_blocks<
         const VPS: usize,
-        F: FnMut(&str, &Layer<Tsdf, VPS>, &Layer<Esdf, VPS>, &[BlockIndex<VPS>]),
+        F: FnMut(&str, &Layer<Tsdf, VPS>, &Layer<Esdf, VPS>, &[BlockIndex<VPS>], Duration),
     >(
         &mut self,
         tsdf_layer: &Layer<Tsdf, VPS>,
@@ -45,7 +45,6 @@ impl EsdfIntegrator {
         mut callback: F,
     ) {
         let mut dirty_blocks = BTreeSet::new();
-        let mut propagate_blocks = BTreeSet::new();
         let mut sites_indices_to_clear = BTreeSet::new();
         let mut blocks_to_clear = updated_blocks.clone();
 
@@ -114,7 +113,13 @@ impl EsdfIntegrator {
                 esdf_lock.reset_voxels();
             }
 
-            //callback("clear site", tsdf_layer, esdf_layer, &[*block_index]);
+            callback(
+                "clear site",
+                tsdf_layer,
+                esdf_layer,
+                &[*block_index],
+                Duration::from_millis(50),
+            );
         }
 
         // transfer tsdf to esdf
@@ -143,18 +148,26 @@ impl EsdfIntegrator {
 
         while !dirty_blocks.is_empty() {
             // sweep
-            propagate_blocks = dirty_blocks.clone();
             Self::sweep_gpu(esdf_layer, device, queue, &dirty_blocks).await;
             let indices: Vec<_> = dirty_blocks.iter().copied().collect();
-            dirty_blocks.clear();
-
-            callback("sweep: xy (GPU)", tsdf_layer, esdf_layer, &indices);
+            callback(
+                "sweep: xy (GPU)",
+                tsdf_layer,
+                esdf_layer,
+                &indices,
+                Duration::from_millis(1000),
+            );
 
             // propagate
-            dirty_blocks = Self::propagate_gpu(esdf_layer, device, queue, &propagate_blocks).await;
-            propagate_blocks.clear();
+            dirty_blocks = Self::propagate_gpu(esdf_layer, device, queue, &dirty_blocks).await;
             let indices: Vec<_> = dirty_blocks.iter().copied().collect();
-            callback("prop.: xy (GPU)", tsdf_layer, esdf_layer, &indices);
+            callback(
+                "prop.: xy (GPU)",
+                tsdf_layer,
+                esdf_layer,
+                &indices,
+                Duration::from_millis(1000),
+            );
         }
     }
 

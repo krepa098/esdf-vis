@@ -390,7 +390,7 @@ pub async fn propagate_blocks<const VPS: usize>(
         bind_group_layouts: &[&bind_group_layout],
         push_constant_ranges: &[PushConstantRange {
             stages: wgpu::ShaderStages::COMPUTE,
-            range: 0..8,
+            range: 0..4,
         }],
     });
 
@@ -550,9 +550,7 @@ pub async fn propagate_blocks<const VPS: usize>(
 
     voxel_readback_buffer
         .slice(..)
-        .map_async(wgpu::MapMode::Read, |_| {
-            dbg!("mapped");
-        });
+        .map_async(wgpu::MapMode::Read, |_| {});
 
     block_info_readback_buffer
         .slice(..)
