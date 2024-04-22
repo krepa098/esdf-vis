@@ -32,18 +32,18 @@ impl DrawableVoxel for Tsdf {
 
 /// Esdf Voxel
 #[derive(Debug, Default, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-#[repr(C, align(8))]
+#[repr(C, align(16))]
 pub struct Esdf {
-    pub distance: Real,
-    pub flags: EsdfGpuFlags,
     pub site_block_index: [i32; 3],
-    pub _pad: [u8; 12],
+    pub distance: Real,
+    pub flags: EsdfFlags,
+    pub _pad: [u32; 3],
 }
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, bytemuck::Pod, bytemuck::Zeroable)]
     #[repr(C)]
-    pub struct EsdfGpuFlags: u32 {
+    pub struct EsdfFlags: u32 {
         const Observed = 1<<0;
         const Fixed = 1<<1;
         const HasSiteIndex = 1<<2;
@@ -61,7 +61,7 @@ impl Voxel for Esdf {}
 
 impl DrawableVoxel for Esdf {
     fn color(&self) -> Color {
-        if self.distance != 0.0 && !self.flags.contains(EsdfGpuFlags::Fixed) {
+        if self.distance != 0.0 && !self.flags.contains(EsdfFlags::Fixed) {
             rainbow_map(self.distance.abs() as f32 / 4.0)
         } else {
             Color::default()

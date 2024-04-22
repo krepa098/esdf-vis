@@ -4,7 +4,7 @@ use crate::{
     core::{
         index::{BlockIndex, VoxelIndex},
         layer::Layer,
-        voxel::{Esdf, EsdfGpuFlags, Tsdf},
+        voxel::{Esdf, EsdfFlags, Tsdf},
     },
     wgpu_utils,
 };
@@ -60,7 +60,7 @@ impl EsdfIntegrator {
             let mut esdf_lock = esdf_block.write();
 
             for voxel in esdf_lock.as_mut_slice() {
-                if voxel.flags.contains(EsdfGpuFlags::HasSiteIndex) {
+                if voxel.flags.contains(EsdfFlags::HasSiteIndex) {
                     sites_indices_to_clear.insert(BlockIndex::<VPS>::new(
                         voxel.site_block_index[0],
                         voxel.site_block_index[1],
@@ -81,7 +81,7 @@ impl EsdfIntegrator {
                     let mut esdf_lock = esdf_block.write();
 
                     for voxel in esdf_lock.as_mut_slice() {
-                        if voxel.flags.contains(EsdfGpuFlags::HasSiteIndex)
+                        if voxel.flags.contains(EsdfFlags::HasSiteIndex)
                             && sites_indices_to_clear.contains(&BlockIndex::<VPS>::new(
                                 voxel.site_block_index[0],
                                 voxel.site_block_index[1],
@@ -128,20 +128,19 @@ impl EsdfIntegrator {
 
                 if tsdf_voxel.weight > 0.0 {
                     esdf_voxel.distance = tsdf_voxel.distance;
-                    esdf_voxel.flags.insert(EsdfGpuFlags::Fixed);
-                    esdf_voxel.flags.insert(EsdfGpuFlags::Observed);
+                    esdf_voxel.flags.insert(EsdfFlags::Fixed);
+                    esdf_voxel.flags.insert(EsdfFlags::Observed);
                     esdf_voxel.site_block_index = block_index.coords.into();
                     dirty_blocks.insert(*block_index);
                 } else {
                     esdf_voxel.distance = 0.0;
-                    esdf_voxel.flags.remove(EsdfGpuFlags::Fixed);
-                    esdf_voxel.flags.remove(EsdfGpuFlags::Observed);
-                    esdf_voxel.flags.remove(EsdfGpuFlags::HasSiteIndex);
+                    esdf_voxel.flags.remove(EsdfFlags::Fixed);
+                    esdf_voxel.flags.remove(EsdfFlags::Observed);
+                    esdf_voxel.flags.remove(EsdfFlags::HasSiteIndex);
                 }
             }
         }
 
-        let mut k = 0;
         while !dirty_blocks.is_empty() {
             // sweep
             propagate_blocks = dirty_blocks.clone();
@@ -151,46 +150,11 @@ impl EsdfIntegrator {
 
             callback("sweep: xy (GPU)", tsdf_layer, esdf_layer, &indices);
 
+            // propagate
             dirty_blocks = Self::propagate_gpu(esdf_layer, device, queue, &propagate_blocks).await;
             propagate_blocks.clear();
-            callback("prop.: xy (GPU)", tsdf_layer, esdf_layer, &[]);
-
-            k += 1;
-
-            if k > 10 {
-                break;
-            }
-
-            // prop
-            // while let Some(block_index) = propagate_blocks.pop_first() {
-            //     if let Some(dirty_block_index) =
-            //         Self::propagate_to_neighbour(OpDir::XPlus, &block_index, esdf_layer)
-            //     {
-            //         dirty_blocks.insert(dirty_block_index);
-            //         callback("prop.: x+", tsdf_layer, esdf_layer, &[dirty_block_index]);
-            //     }
-
-            //     if let Some(dirty_block_index) =
-            //         Self::propagate_to_neighbour(OpDir::XMinus, &block_index, esdf_layer)
-            //     {
-            //         dirty_blocks.insert(dirty_block_index);
-            //         callback("prop.: x-", tsdf_layer, esdf_layer, &[dirty_block_index]);
-            //     }
-
-            //     if let Some(dirty_block_index) =
-            //         Self::propagate_to_neighbour(OpDir::YPlus, &block_index, esdf_layer)
-            //     {
-            //         dirty_blocks.insert(dirty_block_index);
-            //         callback("prop.: y+", tsdf_layer, esdf_layer, &[dirty_block_index]);
-            //     }
-
-            //     if let Some(dirty_block_index) =
-            //         Self::propagate_to_neighbour(OpDir::YMinus, &block_index, esdf_layer)
-            //     {
-            //         dirty_blocks.insert(dirty_block_index);
-            //         callback("prop.: y-", tsdf_layer, esdf_layer, &[dirty_block_index]);
-            //     }
-            // }
+            let indices: Vec<_> = dirty_blocks.iter().copied().collect();
+            callback("prop.: xy (GPU)", tsdf_layer, esdf_layer, &indices);
         }
     }
 
@@ -231,16 +195,16 @@ impl EsdfIntegrator {
                     let parent_voxel_index = VoxelIndex(p);
 
                     let parent_voxel = lock.voxel_from_index(&parent_voxel_index);
-                    let parent_fixed = parent_voxel.flags.contains(EsdfGpuFlags::Fixed);
+                    let parent_fixed = parent_voxel.flags.contains(EsdfFlags::Fixed);
                     let parent_dist = parent_voxel.distance;
                     let parent_site_block_index = parent_voxel.site_block_index;
 
                     let voxel = lock.voxel_from_index_mut(&voxel_index);
 
-                    if parent_fixed && !voxel.flags.contains(EsdfGpuFlags::Observed) {
-                        if !voxel.flags.contains(EsdfGpuFlags::Fixed) {
+                    if parent_fixed && !voxel.flags.contains(EsdfFlags::Observed) {
+                        if !voxel.flags.contains(EsdfFlags::Fixed) {
                             voxel.distance = parent_dist + voxel_size;
-                            voxel.flags.insert(EsdfGpuFlags::Fixed);
+                            voxel.flags.insert(EsdfFlags::Fixed);
                             voxel.site_block_index = parent_site_block_index;
                         } else if voxel.distance > parent_dist + voxel_size {
                             voxel.distance = voxel.distance.min(parent_dist + voxel_size);
@@ -298,13 +262,13 @@ impl EsdfIntegrator {
 
                     // propagate through the sides
                     let pivot_voxel = pivot_block.voxel_from_index(&p_voxel_index);
-                    let pivot_fixed = pivot_voxel.flags.contains(EsdfGpuFlags::Fixed);
+                    let pivot_fixed = pivot_voxel.flags.contains(EsdfFlags::Fixed);
                     let pivot_dist = pivot_voxel.distance;
                     let pivot_site_block_index = pivot_voxel.site_block_index;
 
                     let neighbour_voxel = nlock.voxel_from_index_mut(&n_voxel_index);
-                    let neighbour_fixed = neighbour_voxel.flags.contains(EsdfGpuFlags::Fixed);
-                    let neighbour_observed = neighbour_voxel.flags.contains(EsdfGpuFlags::Observed);
+                    let neighbour_fixed = neighbour_voxel.flags.contains(EsdfFlags::Fixed);
+                    let neighbour_observed = neighbour_voxel.flags.contains(EsdfFlags::Observed);
 
                     if pivot_fixed && !neighbour_observed {
                         if neighbour_fixed {
@@ -316,7 +280,7 @@ impl EsdfIntegrator {
                             }
                         } else {
                             neighbour_voxel.distance = pivot_dist + voxel_size;
-                            neighbour_voxel.flags |= EsdfGpuFlags::Fixed;
+                            neighbour_voxel.flags |= EsdfFlags::Fixed;
                             neighbour_voxel.site_block_index = pivot_site_block_index;
                             dirty = true;
                         }
@@ -348,6 +312,7 @@ impl EsdfIntegrator {
         queue: &mut wgpu::Queue,
         dirty_blocks: &BTreeSet<BlockIndex<VPS>>,
     ) -> BTreeSet<BlockIndex<VPS>> {
+        // padded list of blocks (blocks themselves + direct neighbors)
         let block_indices_of_interest = BTreeSet::from_iter(
             dirty_blocks
                 .iter()
@@ -355,6 +320,7 @@ impl EsdfIntegrator {
                 .filter(|p| esdf_layer.has_index(p)),
         );
 
+        // BlockIndex -> u32
         let block_index_map = std::collections::BTreeMap::from_iter(
             block_indices_of_interest
                 .iter()
@@ -362,11 +328,21 @@ impl EsdfIntegrator {
                 .map(|p| (p.1, p.0)),
         );
 
+        // u32 -> BlockIndex
+        let block_index_map_inv = std::collections::BTreeMap::from_iter(
+            block_indices_of_interest
+                .iter()
+                .enumerate()
+                .map(|p| (p.0, p.1)),
+        );
+
+        // a subset of all blocks to upload to the GPU
         let blocks: Vec<_> = block_indices_of_interest
             .iter()
             .filter_map(|p| esdf_layer.block_by_index(p))
             .collect();
 
+        // work indices for the shader
         let workgroup_block_indices: Vec<u32> = dirty_blocks
             .iter()
             .flat_map(|p| {
@@ -380,15 +356,18 @@ impl EsdfIntegrator {
             })
             .collect();
 
-        wgpu_utils::propagate_blocks(
-            device,
-            queue,
-            workgroup_block_indices.as_slice(),
-            blocks.as_slice(),
-        )
-        .await;
+        let block_info =
+            wgpu_utils::propagate_blocks(device, queue, &workgroup_block_indices, &blocks).await;
 
-        BTreeSet::from_iter(block_indices_of_interest.difference(dirty_blocks).copied())
+        // blocks updated by the shader are considered dirty and have to be swept again
+        BTreeSet::from_iter(
+            block_info
+                .iter()
+                .enumerate()
+                .filter(|p| p.1.flags.contains(EsdfFlags::Updated))
+                .map(|p| *block_index_map_inv.get(&p.0).unwrap())
+                .copied(),
+        )
     }
 }
 

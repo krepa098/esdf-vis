@@ -18,9 +18,10 @@ const SpilledZPlus: u32     = 1u << 8;
 const SpilledZMinus: u32    = 1u << 9;
 
 struct EsdfVoxel {
+    site_block_index: vec3<i32>,
     distance: f32,
     flags: u32,
-    site_block_index: vec3<i32>,
+    
 };
 
 struct Block {

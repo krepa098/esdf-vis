@@ -1,6 +1,9 @@
 use wgpu::{include_wgsl, util::DeviceExt, Device, PushConstantRange, Queue, RequestDeviceError};
 
-use crate::core::{block::Block, voxel::Esdf};
+use crate::core::{
+    block::Block,
+    voxel::{Esdf, EsdfFlags},
+};
 
 pub async fn create_adapter() -> Result<(Device, Queue), RequestDeviceError> {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
@@ -182,11 +185,7 @@ pub async fn sweep_blocks<const VPS: usize>(
 
     let voxel_data: Vec<u8> = blocks
         .iter()
-        .flat_map(|p| {
-            bytemuck::try_cast_slice(p.read().as_slice())
-                .unwrap()
-                .to_owned()
-        })
+        .flat_map(|p| bytemuck::cast_slice(p.read().as_slice()).to_owned())
         .collect();
 
     let voxel_storage_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -342,10 +341,10 @@ pub async fn propagate_blocks<const VPS: usize>(
     queue: &mut Queue,
     workgroup_block_indices: &[u32],
     blocks: &[&Block<Esdf, VPS>],
-) {
+) -> Vec<BlockInfo> {
     if blocks.is_empty() {
         println!("sweep_blocks: blocks is empty");
-        return;
+        return vec![];
     }
 
     let shader_module = device.create_shader_module(include_wgsl!("shaders/propagate.wgsl"));
@@ -373,6 +372,16 @@ pub async fn propagate_blocks<const VPS: usize>(
                     ty: wgpu::BufferBindingType::Storage { read_only: false },
                 },
             },
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                count: None,
+                ty: wgpu::BindingType::Buffer {
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                },
+            },
         ],
     });
 
@@ -381,7 +390,7 @@ pub async fn propagate_blocks<const VPS: usize>(
         bind_group_layouts: &[&bind_group_layout],
         push_constant_ranges: &[PushConstantRange {
             stages: wgpu::ShaderStages::COMPUTE,
-            range: 0..12,
+            range: 0..8,
         }],
     });
 
@@ -394,11 +403,7 @@ pub async fn propagate_blocks<const VPS: usize>(
 
     let voxel_data: Vec<u8> = blocks
         .iter()
-        .flat_map(|p| {
-            bytemuck::try_cast_slice(p.read().as_slice())
-                .unwrap()
-                .to_owned()
-        })
+        .flat_map(|p| bytemuck::cast_slice(p.read().as_slice()).to_owned())
         .collect();
 
     let workgroup_block_indices_storage_buffer =
@@ -413,6 +418,14 @@ pub async fn propagate_blocks<const VPS: usize>(
     let voxel_storage_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: None,
         contents: &voxel_data,
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_DST // allow as destination buffer for copy_buffer
+            | wgpu::BufferUsages::COPY_SRC, // allow as source buffer for copy_buffer
+    });
+
+    let block_info_storage_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: None,
+        contents: bytemuck::cast_slice(&vec![BlockInfo::default(); blocks.len()]),
         usage: wgpu::BufferUsages::STORAGE
             | wgpu::BufferUsages::COPY_DST // allow as destination buffer for copy_buffer
             | wgpu::BufferUsages::COPY_SRC, // allow as source buffer for copy_buffer
@@ -439,12 +452,23 @@ pub async fn propagate_blocks<const VPS: usize>(
                 binding: 1,
                 resource: workgroup_block_indices_storage_buffer.as_entire_binding(),
             },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: block_info_storage_buffer.as_entire_binding(),
+            },
         ],
     });
 
     let voxel_readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: None,
         size: voxel_storage_buffer.size(),
+        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+
+    let block_info_readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: None,
+        size: block_info_storage_buffer.size(),
         usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
@@ -480,13 +504,13 @@ pub async fn propagate_blocks<const VPS: usize>(
             dir: PropagateSettings::X,
         };
         comp_pass.set_push_constants(0, bytemuck::cast_slice(&[settings]));
-        comp_pass.dispatch_workgroups(workgroup_block_indices.len() as u32, 1, 1);
+        comp_pass.dispatch_workgroups(workgroup_block_indices.len() as u32 / 7, 1, 1);
 
         let settings = PropagateSettings {
             dir: PropagateSettings::Y,
         };
         comp_pass.set_push_constants(0, bytemuck::cast_slice(&[settings]));
-        comp_pass.dispatch_workgroups(workgroup_block_indices.len() as u32, 1, 1);
+        comp_pass.dispatch_workgroups(workgroup_block_indices.len() as u32 / 7, 1, 1);
     }
 
     encoder.copy_buffer_to_buffer(
@@ -495,6 +519,14 @@ pub async fn propagate_blocks<const VPS: usize>(
         &voxel_readback_buffer,
         0,
         voxel_readback_buffer.size(),
+    );
+
+    encoder.copy_buffer_to_buffer(
+        &block_info_storage_buffer,
+        0,
+        &block_info_readback_buffer,
+        0,
+        block_info_readback_buffer.size(),
     );
 
     // end time
@@ -511,21 +543,25 @@ pub async fn propagate_blocks<const VPS: usize>(
     // submit
     queue.submit(Some(encoder.finish()));
 
-    // readback
+    // readback / map buffers
     timestamp_readback_buffer
         .slice(..)
         .map_async(wgpu::MapMode::Read, |_| {});
 
     voxel_readback_buffer
         .slice(..)
+        .map_async(wgpu::MapMode::Read, |_| {
+            dbg!("mapped");
+        });
+
+    block_info_readback_buffer
+        .slice(..)
         .map_async(wgpu::MapMode::Read, |_| {});
 
     device.poll(wgpu::Maintain::Wait);
 
     let bytes: &[u8] = &voxel_readback_buffer.slice(..).get_mapped_range();
-    let data: &[Esdf] = bytemuck::cast_slice(bytes);
-
-    let voxel_blocks: Vec<_> = data.chunks(VPS * VPS * VPS).collect();
+    let voxel_data: &[Esdf] = bytemuck::cast_slice(bytes);
 
     println!("GPU propgate: Updated {} blocks", blocks.len());
 
@@ -533,10 +569,16 @@ pub async fn propagate_blocks<const VPS: usize>(
     let counts: &[u64; 2] = bytemuck::from_bytes(bytes);
     dbg!(TimestampGpu::new(counts, queue).duration());
 
+    let bytes: &[u8] = &block_info_readback_buffer.slice(..).get_mapped_range();
+    let block_info: &[BlockInfo] = bytemuck::cast_slice(bytes);
+
     // writeback
+    let voxel_blocks: Vec<_> = voxel_data.chunks(VPS * VPS * VPS).collect();
     for (block, voxel_data) in blocks.iter().zip(voxel_blocks) {
         block.write().as_mut_slice().copy_from_slice(voxel_data);
     }
+
+    block_info.to_owned()
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -561,10 +603,10 @@ impl TimestampGpu {
 }
 
 #[derive(Debug, Default, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-#[repr(C, align(2))]
-struct BlockInfo {
-    flags: u32,
-    updated_voxels: u32,
+#[repr(C, align(8))]
+pub struct BlockInfo {
+    pub flags: EsdfFlags,
+    pub updated_voxels: u32,
 }
 
 #[derive(Debug, Default, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
