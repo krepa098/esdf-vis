@@ -32,7 +32,8 @@ async fn run() {
     let mut tsdf_integrator = TsdfIntegrator::new(TsdfIntegratorConfig::default());
 
     let mut esdf_layer = EsdfLayer::new(1.0);
-    let mut esdf_integrator = EsdfIntegrator::new(EsdfIntegratorConfig::default());
+    let mut esdf_integrator =
+        EsdfIntegrator::new(&device, &mut queue, EsdfIntegratorConfig::default());
 
     let renderer = std::rc::Rc::new(std::cell::RefCell::new(Renderer::new(false)));
 
@@ -50,13 +51,13 @@ async fn run() {
             &device,
             &mut queue,
             move |op, tsdf_layer, esdf_layer, block_indices, duration| {
-                renderer_cb.borrow_mut().render_tsdf_layer(
-                    tsdf_layer,
-                    esdf_layer,
-                    block_indices,
-                    op,
-                    Some(duration),
-                );
+                // renderer_cb.borrow_mut().render_tsdf_layer(
+                //     tsdf_layer,
+                //     esdf_layer,
+                //     block_indices,
+                //     op,
+                //     Some(duration),
+                // );
             },
         )
         .await;
@@ -89,13 +90,13 @@ async fn run() {
             &device,
             &mut queue,
             move |op, tsdf_layer, esdf_layer, block_indices, duration| {
-                renderer_cb.borrow_mut().render_tsdf_layer(
-                    tsdf_layer,
-                    esdf_layer,
-                    block_indices,
-                    op,
-                    Some(duration),
-                );
+                // renderer_cb.borrow_mut().render_tsdf_layer(
+                //     tsdf_layer,
+                //     esdf_layer,
+                //     block_indices,
+                //     op,
+                //     Some(duration),
+                // );
             },
         )
         .await;

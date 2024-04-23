@@ -6,7 +6,7 @@ use crate::{
         layer::Layer,
         voxel::{Esdf, EsdfFlags, Tsdf},
     },
-    wgpu_utils,
+    wgpu_utils::{self, GpuPropagate, GpuSweep},
 };
 
 use std::{collections::BTreeSet, time::Duration};
@@ -25,11 +25,21 @@ enum OpDir {
 
 pub struct EsdfIntegrator {
     config: EsdfIntegratorConfig,
+    sweep_cache: GpuSweep,
+    propgate_cache: GpuPropagate,
 }
 
 impl EsdfIntegrator {
-    pub fn new(config: EsdfIntegratorConfig) -> Self {
-        Self { config }
+    pub fn new(
+        device: &wgpu::Device,
+        queue: &mut wgpu::Queue,
+        config: EsdfIntegratorConfig,
+    ) -> Self {
+        Self {
+            config,
+            sweep_cache: GpuSweep::new(device, queue),
+            propgate_cache: GpuPropagate::new(device, queue),
+        }
     }
 
     pub async fn update_blocks<
@@ -149,8 +159,9 @@ impl EsdfIntegrator {
         }
 
         while !dirty_blocks.is_empty() {
+            let start = std::time::Instant::now();
             // sweep
-            Self::sweep_gpu(esdf_layer, device, queue, &dirty_blocks).await;
+            self.sweep_gpu(esdf_layer, device, queue, &dirty_blocks);
             let indices: Vec<_> = dirty_blocks.iter().copied().collect();
             callback(
                 "sweep: xy (GPU)",
@@ -161,7 +172,7 @@ impl EsdfIntegrator {
             );
 
             // propagate
-            dirty_blocks = Self::propagate_gpu(esdf_layer, device, queue, &dirty_blocks).await;
+            dirty_blocks = self.propagate_gpu(esdf_layer, device, queue, &dirty_blocks);
             let indices: Vec<_> = dirty_blocks.iter().copied().collect();
             callback(
                 "prop.: xy (GPU)",
@@ -169,6 +180,10 @@ impl EsdfIntegrator {
                 esdf_layer,
                 &indices,
                 Duration::from_millis(1000),
+            );
+            println!(
+                "ESDF pass finished in {:?}",
+                std::time::Instant::now().duration_since(start)
             );
         }
 
@@ -312,7 +327,8 @@ impl EsdfIntegrator {
         dirty.then_some(nblock_index)
     }
 
-    async fn sweep_gpu<const VPS: usize>(
+    fn sweep_gpu<const VPS: usize>(
+        &mut self,
         esdf_layer: &mut Layer<Esdf, VPS>,
         device: &wgpu::Device,
         queue: &mut wgpu::Queue,
@@ -323,10 +339,12 @@ impl EsdfIntegrator {
             .map(|index| esdf_layer.block_by_index(index).unwrap())
             .collect();
 
-        wgpu_utils::sweep_blocks(device, queue, blocks.as_slice()).await;
+        self.sweep_cache.submit(device, queue, &blocks);
+        // wgpu_utils::sweep_blocks(device, queue, blocks.as_slice()).await;
     }
 
-    async fn propagate_gpu<const VPS: usize>(
+    fn propagate_gpu<const VPS: usize>(
+        &mut self,
         esdf_layer: &mut Layer<Esdf, VPS>,
         device: &wgpu::Device,
         queue: &mut wgpu::Queue,
@@ -377,7 +395,9 @@ impl EsdfIntegrator {
             .collect();
 
         let block_info =
-            wgpu_utils::propagate_blocks(device, queue, &workgroup_block_indices, &blocks).await;
+            self.propgate_cache
+                .submit(device, queue, &workgroup_block_indices, &blocks);
+        // wgpu_utils::propagate_blocks(device, queue, &workgroup_block_indices, &blocks).await;
 
         // blocks updated by the shader are considered dirty and have to be swept again
         BTreeSet::from_iter(

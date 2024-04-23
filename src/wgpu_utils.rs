@@ -132,457 +132,614 @@ pub async fn shader(device: &Device, queue: &mut Queue) {
     dbg!(data);
 }
 
-pub async fn sweep_blocks<const VPS: usize>(
-    device: &Device,
-    queue: &mut Queue,
-    blocks: &[&Block<Esdf, VPS>],
-) {
-    if blocks.is_empty() {
-        println!("sweep_blocks: blocks is empty");
-        return;
-    }
+pub struct GpuSweep {
+    shader_module: wgpu::ShaderModule,
+    bind_group_layout: wgpu::BindGroupLayout,
+    pipeline_layout: wgpu::PipelineLayout,
+    compute_pipeline: wgpu::ComputePipeline,
+    voxel_storage_buffer: wgpu::Buffer,
+    block_info_storage_buffer: wgpu::Buffer,
+    timestamp_query_buffer: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+    voxel_readback_buffer: wgpu::Buffer,
+    block_info_readback_buffer: wgpu::Buffer,
+    timestamp_readback_buffer: wgpu::Buffer,
+    timestamp_query_set: wgpu::QuerySet,
+}
 
-    let shader_module = device.create_shader_module(include_wgsl!("shaders/sweep.wgsl"));
+impl GpuSweep {
+    pub fn new(device: &Device, queue: &mut Queue) -> Self {
+        let shader_module = device.create_shader_module(include_wgsl!("shaders/sweep.wgsl"));
 
-    let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: None,
-        entries: &[
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                count: None,
-                ty: wgpu::BindingType::Buffer {
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                },
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                count: None,
-                ty: wgpu::BindingType::Buffer {
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                },
-            },
-        ],
-    });
-
-    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: None,
-        bind_group_layouts: &[&bind_group_layout],
-        push_constant_ranges: &[],
-    });
-
-    let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: None,
-        layout: Some(&pipeline_layout),
-        module: &shader_module,
-        entry_point: "main",
-    });
-
-    let voxel_data: Vec<u8> = blocks
-        .iter()
-        .flat_map(|p| bytemuck::cast_slice(p.read().as_slice()).to_owned())
-        .collect();
-
-    let voxel_storage_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: None,
-        contents: &voxel_data,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::COPY_DST // allow as destination buffer for copy_buffer
-            | wgpu::BufferUsages::COPY_SRC, // allow as source buffer for copy_buffer
-    });
-
-    let block_info_storage_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: None,
-        contents: bytemuck::cast_slice(&vec![BlockInfo::default(); blocks.len()]),
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::COPY_DST // allow as destination buffer for copy_buffer
-            | wgpu::BufferUsages::COPY_SRC, // allow as source buffer for copy_buffer
-    });
-
-    let timestamp_query_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: None,
-        size: 8 * 2,
-        usage: wgpu::BufferUsages::COPY_DST // allow as destination buffer for copy_buffer
-            | wgpu::BufferUsages::COPY_SRC // allow as source buffer for copy_buffer
-            | wgpu::BufferUsages::QUERY_RESOLVE, // allow for query use
-        mapped_at_creation: false,
-    });
-
-    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: None,
-        layout: &bind_group_layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: voxel_storage_buffer.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: block_info_storage_buffer.as_entire_binding(),
-            },
-        ],
-    });
-
-    let voxel_readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: None,
-        size: voxel_storage_buffer.size(),
-        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-
-    let block_info_readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: None,
-        size: block_info_storage_buffer.size(),
-        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-
-    let timestamp_readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: None,
-        size: timestamp_query_buffer.size(),
-        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-
-    let timestamp_query_set = device.create_query_set(&wgpu::QuerySetDescriptor {
-        label: None,
-        ty: wgpu::QueryType::Timestamp,
-        count: 2,
-    });
-
-    let mut encoder =
-        device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-
-    // initial time
-    encoder.write_timestamp(&timestamp_query_set, 0);
-
-    {
-        let mut comp_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: None,
-            timestamp_writes: None,
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    count: None,
+                    ty: wgpu::BindingType::Buffer {
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    },
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    count: None,
+                    ty: wgpu::BindingType::Buffer {
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    },
+                },
+            ],
         });
-        comp_pass.set_bind_group(0, &bind_group, &[]);
-        comp_pass.set_pipeline(&compute_pipeline);
-        comp_pass.dispatch_workgroups(blocks.len() as u32, 1, 1);
+
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: None,
+            bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[],
+        });
+
+        let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: None,
+            layout: Some(&pipeline_layout),
+            module: &shader_module,
+            entry_point: "main",
+        });
+
+        let voxel_storage_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: 1024 * 1024 * 256,
+            mapped_at_creation: false,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST // allow as destination buffer for copy_buffer
+                | wgpu::BufferUsages::COPY_SRC, // allow as source buffer for copy_buffer
+        });
+
+        let block_info_storage_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: 1024 * 1024 * 128,
+            mapped_at_creation: false,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST // allow as destination buffer for copy_buffer
+                | wgpu::BufferUsages::COPY_SRC, // allow as source buffer for copy_buffer
+        });
+
+        let timestamp_query_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: 8 * 2,
+            usage: wgpu::BufferUsages::COPY_DST // allow as destination buffer for copy_buffer
+                | wgpu::BufferUsages::COPY_SRC // allow as source buffer for copy_buffer
+                | wgpu::BufferUsages::QUERY_RESOLVE, // allow for query use
+            mapped_at_creation: false,
+        });
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: voxel_storage_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: block_info_storage_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        let voxel_readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: 1024 * 1024 * 256, //voxel_storage_buffer.size(),
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let block_info_readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: 1024 * 1024 * 256, //block_info_storage_buffer.size(),
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let timestamp_readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: timestamp_query_buffer.size(),
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let timestamp_query_set = device.create_query_set(&wgpu::QuerySetDescriptor {
+            label: None,
+            ty: wgpu::QueryType::Timestamp,
+            count: 2,
+        });
+
+        Self {
+            shader_module,
+            bind_group_layout,
+            pipeline_layout,
+            compute_pipeline,
+            voxel_storage_buffer,
+            block_info_storage_buffer,
+            timestamp_query_buffer,
+            bind_group,
+            voxel_readback_buffer,
+            block_info_readback_buffer,
+            timestamp_readback_buffer,
+            timestamp_query_set,
+        }
     }
 
-    encoder.copy_buffer_to_buffer(
-        &voxel_storage_buffer,
-        0,
-        &voxel_readback_buffer,
-        0,
-        voxel_readback_buffer.size(),
-    );
+    pub fn submit<const VPS: usize>(
+        &mut self,
+        device: &Device,
+        queue: &mut Queue,
+        blocks: &[&Block<Esdf, VPS>],
+    ) {
+        // prepare data
+        let mut voxels = Vec::with_capacity(blocks.len() * VPS * VPS * VPS);
+        for block in blocks {
+            for voxel in block.read().as_slice() {
+                voxels.push(*voxel);
+            }
+        }
+        let voxel_data: &[u8] = bytemuck::cast_slice(&voxels);
 
-    encoder.copy_buffer_to_buffer(
-        &block_info_storage_buffer,
-        0,
-        &block_info_readback_buffer,
-        0,
-        block_info_readback_buffer.size(),
-    );
+        let block_info = vec![BlockInfo::default(); blocks.len()];
+        let block_info_data: &[u8] = bytemuck::cast_slice(&block_info);
 
-    // end time
-    encoder.write_timestamp(&timestamp_query_set, 1);
-    encoder.resolve_query_set(&timestamp_query_set, 0..2, &timestamp_query_buffer, 0);
-    encoder.copy_buffer_to_buffer(
-        &timestamp_query_buffer,
-        0,
-        &timestamp_readback_buffer,
-        0,
-        timestamp_readback_buffer.size(),
-    );
+        queue.write_buffer(&self.voxel_storage_buffer, 0, voxel_data);
+        queue.write_buffer(&self.block_info_storage_buffer, 0, block_info_data);
 
-    // submit
-    queue.submit(Some(encoder.finish()));
+        // record command
+        let mut encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
-    // readback
-    timestamp_readback_buffer
-        .slice(..)
-        .map_async(wgpu::MapMode::Read, |_| {});
-    block_info_readback_buffer
-        .slice(..)
-        .map_async(wgpu::MapMode::Read, |_| {});
+        // initial time
+        encoder.write_timestamp(&self.timestamp_query_set, 0);
 
-    voxel_readback_buffer
-        .slice(..)
-        .map_async(wgpu::MapMode::Read, |_| {});
+        {
+            let mut comp_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: None,
+                timestamp_writes: None,
+            });
+            comp_pass.set_bind_group(0, &self.bind_group, &[]);
+            comp_pass.set_pipeline(&self.compute_pipeline);
+            comp_pass.dispatch_workgroups(blocks.len() as u32, 1, 1);
+        }
 
-    device.poll(wgpu::Maintain::Wait);
+        encoder.copy_buffer_to_buffer(
+            &self.voxel_storage_buffer,
+            0,
+            &self.voxel_readback_buffer,
+            0,
+            voxel_data.len() as u64,
+        );
 
-    let bytes: &[u8] = &voxel_readback_buffer.slice(..).get_mapped_range();
-    let data: &[Esdf] = bytemuck::cast_slice(bytes);
+        encoder.copy_buffer_to_buffer(
+            &self.block_info_storage_buffer,
+            0,
+            &self.block_info_readback_buffer,
+            0,
+            block_info_data.len() as u64,
+        );
 
-    let voxel_blocks: Vec<_> = data.chunks(VPS * VPS * VPS).collect();
+        // end time
+        encoder.write_timestamp(&self.timestamp_query_set, 1);
+        encoder.resolve_query_set(
+            &self.timestamp_query_set,
+            0..2,
+            &self.timestamp_query_buffer,
+            0,
+        );
+        encoder.copy_buffer_to_buffer(
+            &self.timestamp_query_buffer,
+            0,
+            &self.timestamp_readback_buffer,
+            0,
+            self.timestamp_readback_buffer.size(),
+        );
 
-    let bytes: &[u8] = &timestamp_readback_buffer.slice(..).get_mapped_range();
-    let counts: &[u64; 2] = bytemuck::from_bytes(bytes);
+        // submit
+        queue.submit(Some(encoder.finish()));
 
-    println!(
-        "GPU sweep:\t{} blocks\t{:?}",
-        blocks.len(),
-        TimestampGpu::new(counts, queue).duration()
-    );
+        // readback
+        self.timestamp_readback_buffer
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, |_| {});
+        self.block_info_readback_buffer
+            .slice(..block_info_data.len() as u64)
+            .map_async(wgpu::MapMode::Read, |_| {});
 
-    let bytes: &[u8] = &block_info_readback_buffer.slice(..).get_mapped_range();
-    let block_info: &[BlockInfo] = bytemuck::cast_slice(bytes);
-    // dbg!(block_info);
+        self.voxel_readback_buffer
+            .slice(..voxel_data.len() as u64)
+            .map_async(wgpu::MapMode::Read, |_| {});
 
-    // writeback
-    for (block, voxel_data) in blocks.iter().zip(voxel_blocks) {
-        block.write().as_mut_slice().copy_from_slice(voxel_data);
+        let start = std::time::Instant::now();
+        device.poll(wgpu::Maintain::Wait);
+        println!(
+            "GPU sweep: polled for {:?}",
+            std::time::Instant::now().duration_since(start)
+        );
+
+        {
+            let bytes: &[u8] = &self
+                .voxel_readback_buffer
+                .slice(..voxel_data.len() as u64)
+                .get_mapped_range();
+            let data: &[Esdf] = bytemuck::cast_slice(bytes);
+
+            let voxel_blocks: Vec<_> = data.chunks(VPS * VPS * VPS).collect();
+
+            let bytes: &[u8] = &self.timestamp_readback_buffer.slice(..).get_mapped_range();
+            let counts: &[u64; 2] = bytemuck::from_bytes(bytes);
+
+            println!(
+                "GPU sweep:\t{} blocks\t{:?}",
+                blocks.len(),
+                TimestampGpu::new(counts, queue).duration()
+            );
+
+            let bytes: &[u8] = &self
+                .block_info_readback_buffer
+                .slice(..block_info_data.len() as u64)
+                .get_mapped_range();
+            let block_info: &[BlockInfo] = bytemuck::cast_slice(bytes);
+
+            // writeback
+            for (block, voxel_data) in blocks.iter().zip(voxel_blocks) {
+                block.write().as_mut_slice().copy_from_slice(voxel_data);
+            }
+        }
+
+        self.voxel_readback_buffer.unmap();
+        self.block_info_readback_buffer.unmap();
+        self.timestamp_readback_buffer.unmap();
     }
 }
 
-pub async fn propagate_blocks<const VPS: usize>(
-    device: &Device,
-    queue: &mut Queue,
-    workgroup_block_indices: &[u32],
-    blocks: &[&Block<Esdf, VPS>],
-) -> Vec<BlockInfo> {
-    if blocks.is_empty() {
-        println!("sweep_blocks: blocks is empty");
-        return vec![];
-    }
+pub struct GpuPropagate {
+    shader_module: wgpu::ShaderModule,
+    bind_group_layout: wgpu::BindGroupLayout,
+    pipeline_layout: wgpu::PipelineLayout,
+    compute_pipeline: wgpu::ComputePipeline,
+    voxel_storage_buffer: wgpu::Buffer,
+    block_info_storage_buffer: wgpu::Buffer,
+    timestamp_query_buffer: wgpu::Buffer,
+    workgroup_block_indices_storage_buffer: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+    voxel_readback_buffer: wgpu::Buffer,
+    block_info_readback_buffer: wgpu::Buffer,
+    timestamp_readback_buffer: wgpu::Buffer,
+    timestamp_query_set: wgpu::QuerySet,
+}
 
-    let shader_module = device.create_shader_module(include_wgsl!("shaders/propagate.wgsl"));
+impl GpuPropagate {
+    pub fn new(device: &Device, queue: &mut Queue) -> Self {
+        let shader_module = device.create_shader_module(include_wgsl!("shaders/propagate.wgsl"));
 
-    let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: None,
-        entries: &[
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                count: None,
-                ty: wgpu::BindingType::Buffer {
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                },
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                count: None,
-                ty: wgpu::BindingType::Buffer {
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                },
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 2,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                count: None,
-                ty: wgpu::BindingType::Buffer {
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                },
-            },
-        ],
-    });
-
-    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: None,
-        bind_group_layouts: &[&bind_group_layout],
-        push_constant_ranges: &[PushConstantRange {
-            stages: wgpu::ShaderStages::COMPUTE,
-            range: 0..4,
-        }],
-    });
-
-    let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: None,
-        layout: Some(&pipeline_layout),
-        module: &shader_module,
-        entry_point: "main",
-    });
-
-    let voxel_data: Vec<u8> = blocks
-        .iter()
-        .flat_map(|p| bytemuck::cast_slice(p.read().as_slice()).to_owned())
-        .collect();
-
-    let workgroup_block_indices_storage_buffer =
-        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: None,
-            contents: bytemuck::cast_slice(workgroup_block_indices),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    count: None,
+                    ty: wgpu::BindingType::Buffer {
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    },
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    count: None,
+                    ty: wgpu::BindingType::Buffer {
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    },
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    count: None,
+                    ty: wgpu::BindingType::Buffer {
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    },
+                },
+            ],
+        });
+
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: None,
+            bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[PushConstantRange {
+                stages: wgpu::ShaderStages::COMPUTE,
+                range: 0..4,
+            }],
+        });
+
+        let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: None,
+            layout: Some(&pipeline_layout),
+            module: &shader_module,
+            entry_point: "main",
+        });
+
+        let voxel_storage_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: 1024 * 1024 * 256,
+            mapped_at_creation: false,
             usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::COPY_DST // allow as destination buffer for copy_buffer
-            | wgpu::BufferUsages::COPY_SRC, // allow as source buffer for copy_buffer
+                | wgpu::BufferUsages::COPY_DST // allow as destination buffer for copy_buffer
+                | wgpu::BufferUsages::COPY_SRC, // allow as source buffer for copy_buffer
         });
 
-    let voxel_storage_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: None,
-        contents: &voxel_data,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::COPY_DST // allow as destination buffer for copy_buffer
-            | wgpu::BufferUsages::COPY_SRC, // allow as source buffer for copy_buffer
-    });
-
-    let block_info_storage_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: None,
-        contents: bytemuck::cast_slice(&vec![BlockInfo::default(); blocks.len()]),
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::COPY_DST // allow as destination buffer for copy_buffer
-            | wgpu::BufferUsages::COPY_SRC, // allow as source buffer for copy_buffer
-    });
-
-    let timestamp_query_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: None,
-        size: 8 * 2,
-        usage: wgpu::BufferUsages::COPY_DST // allow as destination buffer for copy_buffer
-            | wgpu::BufferUsages::COPY_SRC // allow as source buffer for copy_buffer
-            | wgpu::BufferUsages::QUERY_RESOLVE, // allow for query use
-        mapped_at_creation: false,
-    });
-
-    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: None,
-        layout: &bind_group_layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: voxel_storage_buffer.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: workgroup_block_indices_storage_buffer.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: block_info_storage_buffer.as_entire_binding(),
-            },
-        ],
-    });
-
-    let voxel_readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: None,
-        size: voxel_storage_buffer.size(),
-        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-
-    let block_info_readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: None,
-        size: block_info_storage_buffer.size(),
-        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-
-    let timestamp_readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: None,
-        size: timestamp_query_buffer.size(),
-        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-
-    let timestamp_query_set = device.create_query_set(&wgpu::QuerySetDescriptor {
-        label: None,
-        ty: wgpu::QueryType::Timestamp,
-        count: 2,
-    });
-
-    let mut encoder =
-        device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-
-    // initial time
-    encoder.write_timestamp(&timestamp_query_set, 0);
-
-    {
-        let mut comp_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+        let block_info_storage_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
-            timestamp_writes: None,
+            size: 1024 * 1024 * 128,
+            mapped_at_creation: false,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST // allow as destination buffer for copy_buffer
+                | wgpu::BufferUsages::COPY_SRC, // allow as source buffer for copy_buffer
         });
 
-        comp_pass.set_bind_group(0, &bind_group, &[]);
-        comp_pass.set_pipeline(&compute_pipeline);
-        let settings = PropagateSettings {
-            dir: PropagateSettings::X,
-        };
-        comp_pass.set_push_constants(0, bytemuck::cast_slice(&[settings]));
-        comp_pass.dispatch_workgroups(workgroup_block_indices.len() as u32 / 7, 1, 1);
+        let workgroup_block_indices_storage_buffer =
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                size: 1024 * 1024 * 128,
+                mapped_at_creation: false,
+                usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_DST // allow as destination buffer for copy_buffer
+            | wgpu::BufferUsages::COPY_SRC, // allow as source buffer for copy_buffer
+            });
 
-        let settings = PropagateSettings {
-            dir: PropagateSettings::Y,
-        };
-        comp_pass.set_push_constants(0, bytemuck::cast_slice(&[settings]));
-        comp_pass.dispatch_workgroups(workgroup_block_indices.len() as u32 / 7, 1, 1);
+        let timestamp_query_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: 8 * 2,
+            usage: wgpu::BufferUsages::COPY_DST // allow as destination buffer for copy_buffer
+                | wgpu::BufferUsages::COPY_SRC // allow as source buffer for copy_buffer
+                | wgpu::BufferUsages::QUERY_RESOLVE, // allow for query use
+            mapped_at_creation: false,
+        });
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: voxel_storage_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: workgroup_block_indices_storage_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: block_info_storage_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        let voxel_readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: 1024 * 1024 * 256,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let block_info_readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: 1024 * 1024 * 256,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let timestamp_readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: timestamp_query_buffer.size(),
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let timestamp_query_set = device.create_query_set(&wgpu::QuerySetDescriptor {
+            label: None,
+            ty: wgpu::QueryType::Timestamp,
+            count: 2,
+        });
+
+        Self {
+            shader_module,
+            bind_group_layout,
+            pipeline_layout,
+            compute_pipeline,
+            voxel_storage_buffer,
+            workgroup_block_indices_storage_buffer,
+            block_info_storage_buffer,
+            timestamp_query_buffer,
+            bind_group,
+            voxel_readback_buffer,
+            block_info_readback_buffer,
+            timestamp_readback_buffer,
+            timestamp_query_set,
+        }
     }
 
-    encoder.copy_buffer_to_buffer(
-        &voxel_storage_buffer,
-        0,
-        &voxel_readback_buffer,
-        0,
-        voxel_readback_buffer.size(),
-    );
+    pub fn submit<const VPS: usize>(
+        &mut self,
+        device: &Device,
+        queue: &mut Queue,
+        workgroup_block_indices: &[u32],
+        blocks: &[&Block<Esdf, VPS>],
+    ) -> Vec<BlockInfo> {
+        let start = std::time::Instant::now();
 
-    encoder.copy_buffer_to_buffer(
-        &block_info_storage_buffer,
-        0,
-        &block_info_readback_buffer,
-        0,
-        block_info_readback_buffer.size(),
-    );
+        // prepare data
+        let mut voxels = Vec::with_capacity(blocks.len() * VPS * VPS * VPS);
+        for block in blocks {
+            for voxel in block.read().as_slice() {
+                voxels.push(*voxel);
+            }
+        }
 
-    // end time
-    encoder.write_timestamp(&timestamp_query_set, 1);
-    encoder.resolve_query_set(&timestamp_query_set, 0..2, &timestamp_query_buffer, 0);
-    encoder.copy_buffer_to_buffer(
-        &timestamp_query_buffer,
-        0,
-        &timestamp_readback_buffer,
-        0,
-        timestamp_readback_buffer.size(),
-    );
+        let voxel_data: &[u8] = bytemuck::cast_slice(&voxels);
 
-    // submit
-    queue.submit(Some(encoder.finish()));
+        let block_info = vec![BlockInfo::default(); blocks.len()];
+        let block_info_data: &[u8] = bytemuck::cast_slice(&block_info);
 
-    // readback / map buffers
-    timestamp_readback_buffer
-        .slice(..)
-        .map_async(wgpu::MapMode::Read, |_| {});
+        let workgroup_block_indices_data: &[u8] = bytemuck::cast_slice(workgroup_block_indices);
 
-    voxel_readback_buffer
-        .slice(..)
-        .map_async(wgpu::MapMode::Read, |_| {});
+        queue.write_buffer(&self.voxel_storage_buffer, 0, voxel_data);
+        queue.write_buffer(&self.block_info_storage_buffer, 0, block_info_data);
+        queue.write_buffer(
+            &self.workgroup_block_indices_storage_buffer,
+            0,
+            workgroup_block_indices_data,
+        );
 
-    block_info_readback_buffer
-        .slice(..)
-        .map_async(wgpu::MapMode::Read, |_| {});
+        // record command
+        let mut encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
-    device.poll(wgpu::Maintain::Wait);
+        // initial time
+        encoder.write_timestamp(&self.timestamp_query_set, 0);
 
-    let bytes: &[u8] = &voxel_readback_buffer.slice(..).get_mapped_range();
-    let voxel_data: &[Esdf] = bytemuck::cast_slice(bytes);
+        {
+            let mut comp_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: None,
+                timestamp_writes: None,
+            });
 
-    let bytes: &[u8] = &timestamp_readback_buffer.slice(..).get_mapped_range();
-    let counts: &[u64; 2] = bytemuck::from_bytes(bytes);
+            comp_pass.set_bind_group(0, &self.bind_group, &[]);
+            comp_pass.set_pipeline(&self.compute_pipeline);
+            let settings = PropagateSettings {
+                dir: PropagateSettings::X,
+            };
+            comp_pass.set_push_constants(0, bytemuck::cast_slice(&[settings]));
+            comp_pass.dispatch_workgroups(workgroup_block_indices.len() as u32 / 7, 1, 1);
 
-    println!(
-        "GPU propagate:\t{} blocks\t{:?}",
-        blocks.len(),
-        TimestampGpu::new(counts, queue).duration()
-    );
+            let settings = PropagateSettings {
+                dir: PropagateSettings::Y,
+            };
+            comp_pass.set_push_constants(0, bytemuck::cast_slice(&[settings]));
+            comp_pass.dispatch_workgroups(workgroup_block_indices.len() as u32 / 7, 1, 1);
+        }
 
-    let bytes: &[u8] = &block_info_readback_buffer.slice(..).get_mapped_range();
-    let block_info: &[BlockInfo] = bytemuck::cast_slice(bytes);
+        encoder.copy_buffer_to_buffer(
+            &self.voxel_storage_buffer,
+            0,
+            &self.voxel_readback_buffer,
+            0,
+            voxel_data.len() as u64,
+        );
 
-    // writeback
-    let voxel_blocks: Vec<_> = voxel_data.chunks(VPS * VPS * VPS).collect();
-    for (block, voxel_data) in blocks.iter().zip(voxel_blocks) {
-        block.write().as_mut_slice().copy_from_slice(voxel_data);
+        encoder.copy_buffer_to_buffer(
+            &self.block_info_storage_buffer,
+            0,
+            &self.block_info_readback_buffer,
+            0,
+            block_info_data.len() as u64,
+        );
+
+        // end time
+        encoder.write_timestamp(&self.timestamp_query_set, 1);
+        encoder.resolve_query_set(
+            &self.timestamp_query_set,
+            0..2,
+            &self.timestamp_query_buffer,
+            0,
+        );
+        encoder.copy_buffer_to_buffer(
+            &self.timestamp_query_buffer,
+            0,
+            &self.timestamp_readback_buffer,
+            0,
+            self.timestamp_readback_buffer.size(),
+        );
+
+        println!(
+            "GPU propgate: prepare for {:?}",
+            std::time::Instant::now().duration_since(start)
+        );
+
+        // submit
+        queue.submit(Some(encoder.finish()));
+
+        // readback
+        self.timestamp_readback_buffer
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, |_| {});
+
+        self.block_info_readback_buffer
+            .slice(..block_info_data.len() as u64)
+            .map_async(wgpu::MapMode::Read, |_| {});
+
+        self.voxel_readback_buffer
+            .slice(..voxel_data.len() as u64)
+            .map_async(wgpu::MapMode::Read, |_| {});
+
+        let start = std::time::Instant::now();
+        device.poll(wgpu::Maintain::Wait);
+        println!(
+            "GPU propgate: polled for {:?}",
+            std::time::Instant::now().duration_since(start)
+        );
+
+        let start = std::time::Instant::now();
+
+        let block_info = {
+            let bytes: &[u8] = &self
+                .voxel_readback_buffer
+                .slice(..voxel_data.len() as u64)
+                .get_mapped_range();
+            let data: &[Esdf] = bytemuck::cast_slice(bytes);
+
+            let voxel_blocks: Vec<_> = data.chunks(VPS * VPS * VPS).collect();
+
+            let bytes: &[u8] = &self.timestamp_readback_buffer.slice(..).get_mapped_range();
+            let counts: &[u64; 2] = bytemuck::from_bytes(bytes);
+
+            println!(
+                "GPU propgate:\t{} blocks\t{:?}",
+                blocks.len(),
+                TimestampGpu::new(counts, queue).duration()
+            );
+
+            let bytes: &[u8] = &self
+                .block_info_readback_buffer
+                .slice(..block_info_data.len() as u64)
+                .get_mapped_range();
+            let block_info: &[BlockInfo] = bytemuck::cast_slice(bytes);
+
+            // writeback
+            for (block, voxel_data) in blocks.iter().zip(voxel_blocks) {
+                block.write().as_mut_slice().copy_from_slice(voxel_data);
+            }
+
+            block_info.to_owned()
+        };
+
+        self.voxel_readback_buffer.unmap();
+        self.block_info_readback_buffer.unmap();
+        self.timestamp_readback_buffer.unmap();
+
+        println!(
+            "GPU propgate: writeback {:?}",
+            std::time::Instant::now().duration_since(start)
+        );
+
+        block_info
     }
-
-    block_info.to_owned()
 }
 
 #[derive(Debug, Clone, Copy)]
