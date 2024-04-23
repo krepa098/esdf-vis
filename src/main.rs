@@ -1,11 +1,10 @@
 use std::collections::BTreeSet;
 
-use integrators::{
-    esdf_gpu::{EsdfIntegrator, EsdfIntegratorConfig},
-    tsdf::{TsdfIntegrator, TsdfIntegratorConfig},
-};
+use integrators::tsdf::{TsdfIntegrator, TsdfIntegratorConfig};
 
 use renderer::Renderer;
+
+use crate::integrators::{esdf, esdf_gpu};
 
 mod core;
 mod integrators;
@@ -36,8 +35,11 @@ async fn run() {
     let mut tsdf_integrator = TsdfIntegrator::new(TsdfIntegratorConfig::default());
 
     let mut esdf_layer = EsdfLayer::new(1.0);
-    let mut esdf_integrator =
-        EsdfIntegrator::new(&device, &mut queue, EsdfIntegratorConfig::default());
+    let mut esdf_integrator = esdf_gpu::EsdfIntegrator::new(
+        &device,
+        &mut queue,
+        esdf_gpu::EsdfIntegratorConfig::default(),
+    );
 
     let renderer = std::rc::Rc::new(std::cell::RefCell::new(Renderer::new(false)));
 
@@ -93,27 +95,25 @@ async fn run() {
     {
         firestorm::profile_section!(esdf_partial_update);
 
+        let mut esdf_integrator = esdf::EsdfIntegrator::new(esdf::EsdfIntegratorConfig::default());
+
         let renderer_cb = renderer.clone();
-        esdf_integrator
-            .update_blocks(
-                &tsdf_layer,
-                &mut esdf_layer,
-                &dirty_blocks,
-                &device,
-                &mut queue,
-                move |op, tsdf_layer, esdf_layer, block_indices, duration| {
-                    if RENDER {
-                        renderer_cb.borrow_mut().render_tsdf_layer(
-                            tsdf_layer,
-                            esdf_layer,
-                            block_indices,
-                            op,
-                            Some(duration),
-                        );
-                    }
-                },
-            )
-            .await;
+        esdf_integrator.update_blocks(
+            &tsdf_layer,
+            &mut esdf_layer,
+            &dirty_blocks,
+            move |op, tsdf_layer, esdf_layer, block_indices, duration| {
+                if RENDER {
+                    renderer_cb.borrow_mut().render_tsdf_layer(
+                        tsdf_layer,
+                        esdf_layer,
+                        block_indices,
+                        op,
+                        Some(duration),
+                    );
+                }
+            },
+        )
     }
 
     renderer.borrow_mut().render_tsdf_layer(

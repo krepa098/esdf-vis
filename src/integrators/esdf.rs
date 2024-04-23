@@ -3,10 +3,10 @@ use nalgebra::point;
 use crate::core::{
     index::{BlockIndex, VoxelIndex},
     layer::Layer,
-    voxel::{Esdf, Tsdf},
+    voxel::{Esdf, EsdfFlags, Tsdf},
 };
 
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, time::Duration};
 
 #[derive(Default)]
 pub struct EsdfIntegratorConfig {}
@@ -31,7 +31,7 @@ impl EsdfIntegrator {
 
     pub fn update_blocks<
         const VPS: usize,
-        F: FnMut(&str, &Layer<Tsdf, VPS>, &Layer<Esdf, VPS>, &BlockIndex<VPS>),
+        F: FnMut(&str, &Layer<Tsdf, VPS>, &Layer<Esdf, VPS>, &[BlockIndex<VPS>], Duration),
     >(
         &mut self,
         tsdf_layer: &Layer<Tsdf, VPS>,
@@ -55,11 +55,11 @@ impl EsdfIntegrator {
             let mut esdf_lock = esdf_block.write();
 
             for voxel in esdf_lock.as_mut_slice() {
-                if let Some(site_index) = voxel.site_block_index {
-                    sites_indices_to_clear.insert(BlockIndex::<VPS>::new(
-                        site_index.x,
-                        site_index.y,
-                        site_index.z,
+                if voxel.flags.contains(EsdfFlags::HasSiteIndex) {
+                    sites_indices_to_clear.insert(BlockIndex::new(
+                        voxel.site_block_index[0],
+                        voxel.site_block_index[1],
+                        voxel.site_block_index[2],
                     ));
                 }
             }
@@ -76,11 +76,11 @@ impl EsdfIntegrator {
                     let mut esdf_lock = esdf_block.write();
 
                     for voxel in esdf_lock.as_mut_slice() {
-                        if let Some(site_index) = voxel.site_block_index {
+                        if voxel.flags.contains(EsdfFlags::HasSiteIndex) {
                             if sites_indices_to_clear.contains(&BlockIndex::<VPS>::new(
-                                site_index.x,
-                                site_index.y,
-                                site_index.z,
+                                voxel.site_block_index[0],
+                                voxel.site_block_index[1],
+                                voxel.site_block_index[2],
                             )) {
                                 blocks_to_clear.insert(index);
                             }
@@ -89,7 +89,7 @@ impl EsdfIntegrator {
                 }
 
                 // also explore its neighbours
-                for neighbour in index.neighbours() {
+                for neighbour in index.neighbors6() {
                     if !closed_list.contains(&neighbour.index)
                         && esdf_layer.block_by_index(&neighbour.index).is_some()
                     {
@@ -109,7 +109,13 @@ impl EsdfIntegrator {
                 esdf_lock.reset_voxels();
             }
 
-            callback("clear site", tsdf_layer, esdf_layer, block_index);
+            callback(
+                "clear site",
+                tsdf_layer,
+                esdf_layer,
+                &[*block_index],
+                Duration::from_millis(50),
+            );
         }
 
         // transfer tsdf to esdf
@@ -123,15 +129,16 @@ impl EsdfIntegrator {
 
                 if tsdf_voxel.weight > 0.0 {
                     esdf_voxel.distance = tsdf_voxel.distance;
-                    esdf_voxel.fixed = true;
-                    esdf_voxel.observed = true;
-                    esdf_voxel.site_block_index = Some(block_index.coords);
+                    esdf_voxel
+                        .flags
+                        .insert(EsdfFlags::Fixed | EsdfFlags::Observed | EsdfFlags::HasSiteIndex);
+                    esdf_voxel.site_block_index = block_index.coords.into();
                     dirty_blocks.insert(*block_index);
                 } else {
                     esdf_voxel.distance = 0.0;
-                    esdf_voxel.fixed = false;
-                    esdf_voxel.observed = false;
-                    esdf_voxel.site_block_index = None;
+                    esdf_voxel
+                        .flags
+                        .remove(EsdfFlags::Fixed | EsdfFlags::Observed | EsdfFlags::HasSiteIndex);
                 }
             }
         }
@@ -139,13 +146,37 @@ impl EsdfIntegrator {
         while !dirty_blocks.is_empty() {
             while let Some(block_index) = dirty_blocks.pop_first() {
                 Self::sweep_block(OpDir::XPlus, &block_index, esdf_layer);
-                callback("sweep: x+", tsdf_layer, esdf_layer, &block_index);
+                callback(
+                    "sweep: x+",
+                    tsdf_layer,
+                    esdf_layer,
+                    &[block_index],
+                    Duration::from_millis(50),
+                );
                 Self::sweep_block(OpDir::XMinus, &block_index, esdf_layer);
-                callback("sweep: x-", tsdf_layer, esdf_layer, &block_index);
+                callback(
+                    "sweep: x-",
+                    tsdf_layer,
+                    esdf_layer,
+                    &[block_index],
+                    Duration::from_millis(50),
+                );
                 Self::sweep_block(OpDir::YPlus, &block_index, esdf_layer);
-                callback("sweep: y+", tsdf_layer, esdf_layer, &block_index);
+                callback(
+                    "sweep: y+",
+                    tsdf_layer,
+                    esdf_layer,
+                    &[block_index],
+                    Duration::from_millis(50),
+                );
                 Self::sweep_block(OpDir::YMinus, &block_index, esdf_layer);
-                callback("sweep: y-", tsdf_layer, esdf_layer, &block_index);
+                callback(
+                    "sweep: y-",
+                    tsdf_layer,
+                    esdf_layer,
+                    &[block_index],
+                    Duration::from_millis(50),
+                );
 
                 propagate_blocks.insert(block_index);
             }
@@ -155,28 +186,52 @@ impl EsdfIntegrator {
                     Self::propagate_to_neighbour(OpDir::XPlus, &block_index, esdf_layer)
                 {
                     dirty_blocks.insert(dirty_block_index);
-                    callback("prop.: x+", tsdf_layer, esdf_layer, &dirty_block_index);
+                    callback(
+                        "prop.: x+",
+                        tsdf_layer,
+                        esdf_layer,
+                        &[dirty_block_index],
+                        Duration::from_millis(50),
+                    );
                 }
 
                 if let Some(dirty_block_index) =
                     Self::propagate_to_neighbour(OpDir::XMinus, &block_index, esdf_layer)
                 {
                     dirty_blocks.insert(dirty_block_index);
-                    callback("prop.: x-", tsdf_layer, esdf_layer, &dirty_block_index);
+                    callback(
+                        "prop.: x-",
+                        tsdf_layer,
+                        esdf_layer,
+                        &[dirty_block_index],
+                        Duration::from_millis(50),
+                    );
                 }
 
                 if let Some(dirty_block_index) =
                     Self::propagate_to_neighbour(OpDir::YPlus, &block_index, esdf_layer)
                 {
                     dirty_blocks.insert(dirty_block_index);
-                    callback("prop.: y+", tsdf_layer, esdf_layer, &dirty_block_index);
+                    callback(
+                        "prop.: y+",
+                        tsdf_layer,
+                        esdf_layer,
+                        &[dirty_block_index],
+                        Duration::from_millis(50),
+                    );
                 }
 
                 if let Some(dirty_block_index) =
                     Self::propagate_to_neighbour(OpDir::YMinus, &block_index, esdf_layer)
                 {
                     dirty_blocks.insert(dirty_block_index);
-                    callback("prop.: y-", tsdf_layer, esdf_layer, &dirty_block_index);
+                    callback(
+                        "prop.: y-",
+                        tsdf_layer,
+                        esdf_layer,
+                        &[dirty_block_index],
+                        Duration::from_millis(50),
+                    );
                 }
             }
         }
@@ -219,16 +274,16 @@ impl EsdfIntegrator {
                     let parent_voxel_index = VoxelIndex(p);
 
                     let parent_voxel = lock.voxel_from_index(&parent_voxel_index);
-                    let parent_fixed = parent_voxel.fixed;
+                    let parent_fixed = parent_voxel.flags.contains(EsdfFlags::Fixed);
                     let parent_dist = parent_voxel.distance;
                     let parent_site_block_index = parent_voxel.site_block_index;
 
                     let voxel = lock.voxel_from_index_mut(&voxel_index);
 
-                    if parent_fixed && !voxel.observed {
-                        if !voxel.fixed {
+                    if parent_fixed && !voxel.flags.contains(EsdfFlags::Observed) {
+                        if !voxel.flags.contains(EsdfFlags::Fixed) {
                             voxel.distance = parent_dist + voxel_size;
-                            voxel.fixed = true;
+                            voxel.flags.insert(EsdfFlags::Fixed);
                             voxel.site_block_index = parent_site_block_index;
                         } else if voxel.distance > parent_dist + voxel_size {
                             voxel.distance = voxel.distance.min(parent_dist + voxel_size);
@@ -286,13 +341,13 @@ impl EsdfIntegrator {
 
                     // propagate through the sides
                     let pivot_voxel = pivot_block.voxel_from_index(&p_voxel_index);
-                    let pivot_fixed = pivot_voxel.fixed;
+                    let pivot_fixed = pivot_voxel.flags.contains(EsdfFlags::Fixed);
                     let pivot_dist = pivot_voxel.distance;
                     let pivot_site_block_index = pivot_voxel.site_block_index;
 
                     let neighbour_voxel = nlock.voxel_from_index_mut(&n_voxel_index);
-                    let neighbour_fixed = neighbour_voxel.fixed;
-                    let neighbour_observed = neighbour_voxel.observed;
+                    let neighbour_fixed = neighbour_voxel.flags.contains(EsdfFlags::Fixed);
+                    let neighbour_observed = neighbour_voxel.flags.contains(EsdfFlags::Observed);
 
                     if pivot_fixed && !neighbour_observed {
                         if neighbour_fixed {
@@ -304,7 +359,7 @@ impl EsdfIntegrator {
                             }
                         } else {
                             neighbour_voxel.distance = pivot_dist + voxel_size;
-                            neighbour_voxel.fixed = true;
+                            neighbour_voxel.flags.insert(EsdfFlags::Fixed);
                             neighbour_voxel.site_block_index = pivot_site_block_index;
                             dirty = true;
                         }
