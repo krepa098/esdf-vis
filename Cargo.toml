@@ -13,7 +13,7 @@ parking_lot = "0.12.1"
 image = "0.25.1"
 imageproc = "0.24.0"
 ab_glyph = "0.2.24"
-wgpu = "0.19.3"
+wgpu = "0.19.4"
 bytemuck = { version = "1.15.0", features = [
     "derive",
     "min_const_generics",
@@ -21,3 +21,4 @@ bytemuck = { version = "1.15.0", features = [
 ] }
 futures = "0.3.30"
 bitflags = { version = "2.5.0", features = ["bytemuck"] }
+firestorm = { version = "0.5.1", features = ["enable_system_time"] }

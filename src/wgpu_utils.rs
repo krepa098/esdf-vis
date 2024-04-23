@@ -281,10 +281,14 @@ impl GpuSweep {
         queue: &mut Queue,
         blocks: &[&Block<Esdf, VPS>],
     ) {
+        firestorm::profile_method!("submit");
+        firestorm::profile_section!(prepare);
+
         // prepare data
         let mut voxels = Vec::with_capacity(blocks.len() * VPS * VPS * VPS);
         for block in blocks {
-            for voxel in block.read().as_slice() {
+            let lock = block.read();
+            for voxel in lock.as_slice() {
                 voxels.push(*voxel);
             }
         }
@@ -345,7 +349,10 @@ impl GpuSweep {
             self.timestamp_readback_buffer.size(),
         );
 
+        drop(prepare);
+
         // submit
+        firestorm::profile_section!(submit_poll);
         queue.submit(Some(encoder.finish()));
 
         // readback
@@ -360,14 +367,13 @@ impl GpuSweep {
             .slice(..voxel_data.len() as u64)
             .map_async(wgpu::MapMode::Read, |_| {});
 
-        let start = std::time::Instant::now();
         device.poll(wgpu::Maintain::Wait);
-        println!(
-            "GPU sweep: polled for {:?}",
-            std::time::Instant::now().duration_since(start)
-        );
+
+        drop(submit_poll);
 
         {
+            firestorm::profile_section!(readback);
+
             let bytes: &[u8] = &self
                 .voxel_readback_buffer
                 .slice(..voxel_data.len() as u64)
@@ -582,13 +588,19 @@ impl GpuPropagate {
         workgroup_block_indices: &[u32],
         blocks: &[&Block<Esdf, VPS>],
     ) -> Vec<BlockInfo> {
-        let start = std::time::Instant::now();
+        firestorm::profile_method!("submit");
+        firestorm::profile_section!(prepare);
 
         // prepare data
         let mut voxels = Vec::with_capacity(blocks.len() * VPS * VPS * VPS);
-        for block in blocks {
-            for voxel in block.read().as_slice() {
-                voxels.push(*voxel);
+
+        {
+            firestorm::profile_section!(prep_voxels);
+            for block in blocks {
+                let lock = block.read();
+                for voxel in lock.as_slice() {
+                    voxels.push(*voxel);
+                }
             }
         }
 
@@ -667,12 +679,10 @@ impl GpuPropagate {
             self.timestamp_readback_buffer.size(),
         );
 
-        println!(
-            "GPU propgate: prepare for {:?}",
-            std::time::Instant::now().duration_since(start)
-        );
+        drop(prepare);
 
         // submit
+        firestorm::profile_section!(submit_poll);
         queue.submit(Some(encoder.finish()));
 
         // readback
@@ -688,14 +698,10 @@ impl GpuPropagate {
             .slice(..voxel_data.len() as u64)
             .map_async(wgpu::MapMode::Read, |_| {});
 
-        let start = std::time::Instant::now();
         device.poll(wgpu::Maintain::Wait);
-        println!(
-            "GPU propgate: polled for {:?}",
-            std::time::Instant::now().duration_since(start)
-        );
+        drop(submit_poll);
 
-        let start = std::time::Instant::now();
+        firestorm::profile_section!(readback);
 
         let block_info = {
             let bytes: &[u8] = &self
@@ -733,10 +739,7 @@ impl GpuPropagate {
         self.block_info_readback_buffer.unmap();
         self.timestamp_readback_buffer.unmap();
 
-        println!(
-            "GPU propgate: writeback {:?}",
-            std::time::Instant::now().duration_since(start)
-        );
+        drop(readback);
 
         block_info
     }

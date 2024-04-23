@@ -334,6 +334,8 @@ impl EsdfIntegrator {
         queue: &mut wgpu::Queue,
         dirty_blocks: &BTreeSet<BlockIndex<VPS>>,
     ) {
+        firestorm::profile_method!("sweep_gpu");
+
         let blocks: Vec<_> = dirty_blocks
             .iter()
             .map(|index| esdf_layer.block_by_index(index).unwrap())
@@ -350,6 +352,8 @@ impl EsdfIntegrator {
         queue: &mut wgpu::Queue,
         dirty_blocks: &BTreeSet<BlockIndex<VPS>>,
     ) -> BTreeSet<BlockIndex<VPS>> {
+        firestorm::profile_method!("propagate_gpu");
+
         // padded list of blocks (blocks themselves + direct neighbors)
         let block_indices_of_interest = BTreeSet::from_iter(
             dirty_blocks
