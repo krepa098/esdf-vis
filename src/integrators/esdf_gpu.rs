@@ -60,19 +60,27 @@ impl EsdfIntegrator {
         let mut sites_indices_to_clear = BTreeSet::new();
         let mut blocks_to_clear = updated_blocks.clone();
 
+        callback(
+            "tsdf updated",
+            tsdf_layer,
+            esdf_layer,
+            &updated_blocks.iter().copied().collect::<Vec<_>>(),
+            Duration::from_millis(500),
+        );
+
         // allocate all blocks from the tsdf layer
         for block_index in tsdf_layer.allocated_blocks_iter() {
             esdf_layer.allocate_block_by_index(block_index);
         }
 
-        // create a list of sites to clear
+        // create a list of site *indices* to clear
         for block_index in updated_blocks {
             let esdf_block = esdf_layer.allocate_block_by_index(block_index);
-            let mut esdf_lock = esdf_block.write();
+            let esdf_lock = esdf_block.read();
 
-            for voxel in esdf_lock.as_mut_slice() {
+            for voxel in esdf_lock.as_slice() {
                 if voxel.flags.contains(EsdfFlags::HasSiteIndex) {
-                    sites_indices_to_clear.insert(BlockIndex::<VPS>::new(
+                    sites_indices_to_clear.insert(BlockIndex::new(
                         voxel.site_block_index[0],
                         voxel.site_block_index[1],
                         voxel.site_block_index[2],
@@ -82,16 +90,17 @@ impl EsdfIntegrator {
         }
 
         // create a list of all blocks containing sites to clear
-        let mut open_list = updated_blocks.clone();
-        let mut closed_list = BTreeSet::new();
+        let mut open_list = updated_blocks.clone(); // blocks to visit
+        let mut closed_list = BTreeSet::new(); // blocks already visited
         while let Some(index) = open_list.pop_first() {
             closed_list.insert(index);
 
-            if let Some(esdf_block) = esdf_layer.block_by_index_mut(&index) {
+            if let Some(esdf_block) = esdf_layer.block_by_index(&index) {
                 {
-                    let mut esdf_lock = esdf_block.write();
+                    let esdf_lock = esdf_block.read();
+                    let mut flagged_clear = false;
 
-                    for voxel in esdf_lock.as_mut_slice() {
+                    for voxel in esdf_lock.as_slice() {
                         if voxel.flags.contains(EsdfFlags::HasSiteIndex)
                             && sites_indices_to_clear.contains(&BlockIndex::<VPS>::new(
                                 voxel.site_block_index[0],
@@ -100,21 +109,27 @@ impl EsdfIntegrator {
                             ))
                         {
                             blocks_to_clear.insert(index);
+                            flagged_clear = true;
+                            break;
                         }
                     }
-                }
 
-                // also explore its neighbours
-                for neighbour in index.neighbors() {
-                    if !closed_list.contains(&neighbour.index)
-                        && esdf_layer.block_by_index(&neighbour.index).is_some()
-                    {
-                        open_list.insert(neighbour.index);
+                    if flagged_clear {
+                        // also explore its neighbors
+                        for neighbour in index.neighbors6() {
+                            if !closed_list.contains(&neighbour.index)
+                                && esdf_layer.contains(&neighbour.index)
+                            {
+                                open_list.insert(neighbour.index);
+                            }
+                        }
+                    } else {
+                        // propagate from these blocks as
+                        // they are still valid
+                        dirty_blocks.insert(index);
                     }
                 }
             }
-
-            // blocks_to_check.clear();
         }
 
         // reset blocks
@@ -145,15 +160,14 @@ impl EsdfIntegrator {
 
                 if tsdf_voxel.weight > 0.0 {
                     esdf_voxel.distance = tsdf_voxel.distance;
-                    esdf_voxel.flags.insert(EsdfFlags::Fixed);
-                    esdf_voxel.flags.insert(EsdfFlags::Observed);
+                    esdf_voxel
+                        .flags
+                        .insert(EsdfFlags::Fixed | EsdfFlags::Observed | EsdfFlags::HasSiteIndex);
                     esdf_voxel.site_block_index = block_index.coords.into();
                     dirty_blocks.insert(*block_index);
                 } else {
                     esdf_voxel.distance = 0.0;
-                    esdf_voxel.flags.remove(EsdfFlags::Fixed);
-                    esdf_voxel.flags.remove(EsdfFlags::Observed);
-                    esdf_voxel.flags.remove(EsdfFlags::HasSiteIndex);
+                    esdf_voxel.flags.remove(EsdfFlags::all());
                 }
             }
         }
@@ -359,7 +373,7 @@ impl EsdfIntegrator {
             dirty_blocks
                 .iter()
                 .flat_map(|index| index.neighbors6_include_self().map(|p| p.index))
-                .filter(|p| esdf_layer.has_index(p)),
+                .filter(|p| esdf_layer.contains(p)),
         );
 
         // BlockIndex -> u32

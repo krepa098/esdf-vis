@@ -56,7 +56,7 @@ impl<VoxelType: Voxel + Copy, const VPS: usize> Layer<VoxelType, VPS> {
         self.blocks.get(index)
     }
 
-    pub fn has_index(&self, index: &BlockIndex<VPS>) -> bool {
+    pub fn contains(&self, index: &BlockIndex<VPS>) -> bool {
         self.blocks.contains_key(index)
     }
 

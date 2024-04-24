@@ -44,17 +44,25 @@ impl EsdfIntegrator {
         let mut sites_indices_to_clear = BTreeSet::new();
         let mut blocks_to_clear = updated_blocks.clone();
 
+        callback(
+            "tsdf updated",
+            tsdf_layer,
+            esdf_layer,
+            &updated_blocks.iter().copied().collect::<Vec<_>>(),
+            Duration::from_millis(500),
+        );
+
         // allocate all blocks from the tsdf layer
         for block_index in tsdf_layer.allocated_blocks_iter() {
             esdf_layer.allocate_block_by_index(block_index);
         }
 
-        // create a list of sites to clear
+        // create a list of site *indices* to clear
         for block_index in updated_blocks {
             let esdf_block = esdf_layer.allocate_block_by_index(block_index);
-            let mut esdf_lock = esdf_block.write();
+            let esdf_lock = esdf_block.read();
 
-            for voxel in esdf_lock.as_mut_slice() {
+            for voxel in esdf_lock.as_slice() {
                 if voxel.flags.contains(EsdfFlags::HasSiteIndex) {
                     sites_indices_to_clear.insert(BlockIndex::new(
                         voxel.site_block_index[0],
@@ -66,39 +74,46 @@ impl EsdfIntegrator {
         }
 
         // create a list of all blocks containing sites to clear
-        let mut open_list = updated_blocks.clone();
-        let mut closed_list = BTreeSet::new();
+        let mut open_list = updated_blocks.clone(); // blocks to visit
+        let mut closed_list = BTreeSet::new(); // blocks already visited
         while let Some(index) = open_list.pop_first() {
             closed_list.insert(index);
 
-            if let Some(esdf_block) = esdf_layer.block_by_index_mut(&index) {
+            if let Some(esdf_block) = esdf_layer.block_by_index(&index) {
                 {
-                    let mut esdf_lock = esdf_block.write();
+                    let esdf_lock = esdf_block.read();
+                    let mut flagged_clear = false;
 
-                    for voxel in esdf_lock.as_mut_slice() {
-                        if voxel.flags.contains(EsdfFlags::HasSiteIndex) {
-                            if sites_indices_to_clear.contains(&BlockIndex::<VPS>::new(
+                    for voxel in esdf_lock.as_slice() {
+                        if voxel.flags.contains(EsdfFlags::HasSiteIndex)
+                            && sites_indices_to_clear.contains(&BlockIndex::<VPS>::new(
                                 voxel.site_block_index[0],
                                 voxel.site_block_index[1],
                                 voxel.site_block_index[2],
-                            )) {
-                                blocks_to_clear.insert(index);
-                            }
+                            ))
+                        {
+                            blocks_to_clear.insert(index);
+                            flagged_clear = true;
+                            break;
                         }
                     }
-                }
 
-                // also explore its neighbours
-                for neighbour in index.neighbors6() {
-                    if !closed_list.contains(&neighbour.index)
-                        && esdf_layer.block_by_index(&neighbour.index).is_some()
-                    {
-                        open_list.insert(neighbour.index);
+                    if flagged_clear {
+                        // also explore its neighbors
+                        for neighbour in index.neighbors6() {
+                            if !closed_list.contains(&neighbour.index)
+                                && esdf_layer.contains(&neighbour.index)
+                            {
+                                open_list.insert(neighbour.index);
+                            }
+                        }
+                    } else {
+                        // propagate from these blocks as
+                        // they are still valid
+                        dirty_blocks.insert(index);
                     }
                 }
             }
-
-            // blocks_to_check.clear();
         }
 
         // reset blocks
@@ -136,9 +151,7 @@ impl EsdfIntegrator {
                     dirty_blocks.insert(*block_index);
                 } else {
                     esdf_voxel.distance = 0.0;
-                    esdf_voxel
-                        .flags
-                        .remove(EsdfFlags::Fixed | EsdfFlags::Observed | EsdfFlags::HasSiteIndex);
+                    esdf_voxel.flags.remove(EsdfFlags::all());
                 }
             }
         }
@@ -283,10 +296,12 @@ impl EsdfIntegrator {
                     if parent_fixed && !voxel.flags.contains(EsdfFlags::Observed) {
                         if !voxel.flags.contains(EsdfFlags::Fixed) {
                             voxel.distance = parent_dist + voxel_size;
-                            voxel.flags.insert(EsdfFlags::Fixed);
+                            voxel
+                                .flags
+                                .insert(EsdfFlags::Fixed | EsdfFlags::HasSiteIndex);
                             voxel.site_block_index = parent_site_block_index;
                         } else if voxel.distance > parent_dist + voxel_size {
-                            voxel.distance = voxel.distance.min(parent_dist + voxel_size);
+                            voxel.distance = parent_dist + voxel_size;
                             voxel.site_block_index = parent_site_block_index;
                         }
                     }
