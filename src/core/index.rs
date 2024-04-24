@@ -317,6 +317,8 @@ impl<const VPS: usize> Add for BlockIndex<VPS> {
 
 #[cfg(test)]
 mod test {
+    use nalgebra::point;
+
     use super::*;
 
     #[test]
@@ -379,5 +381,23 @@ mod test {
             GlobalIndex::from_block_and_local_lin_index(&block_index, (1 * 2 * 3) - 1);
 
         assert_eq!(global_index, GlobalIndex(Point3::new(2, 1, 0)));
+    }
+
+    #[test]
+    fn neighbors() {
+        let block_index = BlockIndex::<3>::new(0, 0, 0);
+
+        let neighbors: Vec<_> = block_index.neighbors().map(|p| p.index).collect();
+        assert_eq!(neighbors.len(), 26);
+
+        let neighbors: Vec<_> = block_index.neighbors6().map(|p| p.index).collect();
+        assert_eq!(neighbors.len(), 6);
+
+        let neighbors: Vec<_> = block_index
+            .neighbors6_include_self()
+            .map(|p| p.index)
+            .collect();
+        assert_eq!(neighbors.len(), 7);
+        assert_eq!(neighbors[0].0, point![0, 0, 0]);
     }
 }
