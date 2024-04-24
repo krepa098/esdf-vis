@@ -21,7 +21,8 @@ fn main() {
 }
 
 async fn run() {
-    const RENDER: bool = true;
+    const RENDER: bool = false;
+    const USE_GPU: bool = true;
 
     let (device, mut queue) = wgpu_utils::create_adapter().await.unwrap();
 
@@ -35,11 +36,6 @@ async fn run() {
     let mut tsdf_integrator = TsdfIntegrator::new(TsdfIntegratorConfig::default());
 
     let mut esdf_layer = EsdfLayer::new(1.0);
-    let mut esdf_integrator = esdf_gpu::EsdfIntegrator::new(
-        &device,
-        &mut queue,
-        esdf_gpu::EsdfIntegratorConfig::default(),
-    );
 
     let renderer = std::rc::Rc::new(std::cell::RefCell::new(Renderer::new(false)));
 
@@ -51,8 +47,15 @@ async fn run() {
     {
         firestorm::profile_section!(esdf_full_update);
         let renderer_cb = renderer.clone();
-        esdf_integrator
-            .update_blocks(
+
+        if USE_GPU {
+            let mut esdf_integrator = esdf_gpu::EsdfIntegrator::new(
+                &device,
+                &mut queue,
+                esdf_gpu::EsdfIntegratorConfig::default(),
+            );
+
+            esdf_integrator.update_blocks(
                 &tsdf_layer,
                 &mut esdf_layer,
                 &dirty_blocks,
@@ -69,8 +72,28 @@ async fn run() {
                         );
                     }
                 },
+            );
+        } else {
+            let mut esdf_integrator =
+                esdf::EsdfIntegrator::new(esdf::EsdfIntegratorConfig::default());
+
+            esdf_integrator.update_blocks(
+                &tsdf_layer,
+                &mut esdf_layer,
+                &dirty_blocks,
+                move |op, tsdf_layer, esdf_layer, block_indices, duration| {
+                    if RENDER {
+                        renderer_cb.borrow_mut().render_tsdf_layer(
+                            tsdf_layer,
+                            esdf_layer,
+                            block_indices,
+                            op,
+                            Some(duration),
+                        );
+                    }
+                },
             )
-            .await;
+        }
     }
 
     renderer.borrow_mut().render_tsdf_layer(
@@ -94,26 +117,54 @@ async fn run() {
     // generate esdf and render on callback
     {
         firestorm::profile_section!(esdf_partial_update);
-
-        let mut esdf_integrator = esdf::EsdfIntegrator::new(esdf::EsdfIntegratorConfig::default());
-
         let renderer_cb = renderer.clone();
-        esdf_integrator.update_blocks(
-            &tsdf_layer,
-            &mut esdf_layer,
-            &dirty_blocks,
-            move |op, tsdf_layer, esdf_layer, block_indices, duration| {
-                if RENDER {
-                    renderer_cb.borrow_mut().render_tsdf_layer(
-                        tsdf_layer,
-                        esdf_layer,
-                        block_indices,
-                        op,
-                        Some(duration),
-                    );
-                }
-            },
-        )
+
+        if USE_GPU {
+            let mut esdf_integrator = esdf_gpu::EsdfIntegrator::new(
+                &device,
+                &mut queue,
+                esdf_gpu::EsdfIntegratorConfig::default(),
+            );
+
+            esdf_integrator.update_blocks(
+                &tsdf_layer,
+                &mut esdf_layer,
+                &dirty_blocks,
+                &device,
+                &mut queue,
+                move |op, tsdf_layer, esdf_layer, block_indices, duration| {
+                    if RENDER {
+                        renderer_cb.borrow_mut().render_tsdf_layer(
+                            tsdf_layer,
+                            esdf_layer,
+                            block_indices,
+                            op,
+                            Some(duration),
+                        );
+                    }
+                },
+            );
+        } else {
+            let mut esdf_integrator =
+                esdf::EsdfIntegrator::new(esdf::EsdfIntegratorConfig::default());
+
+            esdf_integrator.update_blocks(
+                &tsdf_layer,
+                &mut esdf_layer,
+                &dirty_blocks,
+                move |op, tsdf_layer, esdf_layer, block_indices, duration| {
+                    if RENDER {
+                        renderer_cb.borrow_mut().render_tsdf_layer(
+                            tsdf_layer,
+                            esdf_layer,
+                            block_indices,
+                            op,
+                            Some(duration),
+                        );
+                    }
+                },
+            )
+        }
     }
 
     renderer.borrow_mut().render_tsdf_layer(

@@ -39,6 +39,8 @@ impl EsdfIntegrator {
         updated_blocks: &BTreeSet<BlockIndex<VPS>>,
         mut callback: F,
     ) {
+        let start = std::time::Instant::now();
+
         let mut dirty_blocks = BTreeSet::new();
         let mut propagate_blocks = BTreeSet::new();
         let mut sites_indices_to_clear = BTreeSet::new();
@@ -248,6 +250,11 @@ impl EsdfIntegrator {
                 }
             }
         }
+
+        println!(
+            "=> ESDF update finished in {:?}",
+            std::time::Instant::now().duration_since(start)
+        );
     }
 
     fn sweep_block<const VPS: usize>(
